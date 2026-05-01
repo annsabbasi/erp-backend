@@ -1,5 +1,4 @@
-import { IsEmail, IsString, MinLength, IsEnum, IsOptional, IsArray } from 'class-validator';
-import { Role } from '../../../common/decorators/roles.decorator';
+import { IsEmail, IsString, IsOptional, MinLength, IsArray, IsBoolean } from 'class-validator';
 
 export class CreateUserDto {
   @IsString()
@@ -9,15 +8,15 @@ export class CreateUserDto {
   email: string;
 
   @IsString()
-  @MinLength(4)
+  @MinLength(6)
   password: string;
-
-  @IsEnum(Role)
-  @IsOptional()
-  role?: Role;
 
   @IsArray()
   @IsString({ each: true })
   @IsOptional()
-  modules?: string[];
+  roleIds?: string[];
+
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
 }

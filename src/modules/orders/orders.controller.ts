@@ -1,45 +1,44 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Put,
-  Delete,
-  Body,
-  Param,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequirePermission } from '../../common/decorators/permissions.decorator';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
+  @RequirePermission('purchasing:VIEW')
   @Get()
-  findAll() {
-    return this.ordersService.findAll();
+  findAll(@CurrentUser() user: any) {
+    return this.ordersService.findAll(user.companyId);
   }
 
+  @RequirePermission('purchasing:VIEW')
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.ordersService.findOne(+id);
+  findOne(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.ordersService.findOne(user.companyId, id);
   }
 
+  @RequirePermission('purchasing:CREATE')
   @Post()
-  create(@Body() dto: CreateOrderDto) {
-    return this.ordersService.create(dto);
+  create(@CurrentUser() user: any, @Body() dto: CreateOrderDto) {
+    return this.ordersService.create(user.companyId, dto);
   }
 
+  @RequirePermission('purchasing:UPDATE')
   @Put(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateOrderDto) {
-    return this.ordersService.update(+id, dto);
+  update(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: UpdateOrderDto) {
+    return this.ordersService.update(user.companyId, id, dto);
   }
 
+  @RequirePermission('purchasing:DELETE')
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.ordersService.remove(+id);
+  remove(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.ordersService.remove(user.companyId, id);
   }
 }

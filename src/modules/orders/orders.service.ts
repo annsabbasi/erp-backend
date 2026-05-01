@@ -1,48 +1,59 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create-order.dto';
-import { UpdateOrderDto, OrderStatus } from './dto/update-order.dto';
+import { UpdateOrderDto } from './dto/update-order.dto';
 
 @Injectable()
 export class OrdersService {
-  private orders: any[] = [];
+  constructor(private readonly prisma: PrismaService) {}
 
-  findAll() {
-    return this.orders;
+  findAll(companyId: string) {
+    return this.prisma.order.findMany({
+      where: { companyId },
+      include: { items: { include: { product: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
-  findOne(id: number) {
-    const order = this.orders.find((o) => o.id === id);
-    if (!order) throw new NotFoundException(`Order #${id} not found`);
+  async findOne(companyId: string, id: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { id, companyId },
+      include: { items: { include: { product: true } } },
+    });
+    if (!order) throw new NotFoundException(`Order ${id} not found`);
     return order;
   }
 
-  create(dto: CreateOrderDto) {
-    const total = dto.items.reduce(
-      (sum, item) => sum + item.quantity * item.unitPrice,
-      0,
-    );
-    const order = {
-      id: Date.now(),
-      ...dto,
-      total,
-      status: OrderStatus.PENDING,
-      createdAt: new Date().toISOString(),
-    };
-    this.orders.push(order);
-    return order;
+  create(companyId: string, dto: CreateOrderDto) {
+    const total = dto.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    return this.prisma.order.create({
+      data: {
+        companyId,
+        total,
+        items: {
+          create: dto.items.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+          })),
+        },
+      },
+      include: { items: { include: { product: true } } },
+    });
   }
 
-  update(id: number, dto: UpdateOrderDto) {
-    const index = this.orders.findIndex((o) => o.id === id);
-    if (index === -1) throw new NotFoundException(`Order #${id} not found`);
-    this.orders[index] = { ...this.orders[index], ...dto };
-    return this.orders[index];
+  async update(companyId: string, id: string, dto: UpdateOrderDto) {
+    await this.findOne(companyId, id);
+    return this.prisma.order.update({
+      where: { id },
+      data: { status: dto.status },
+      include: { items: { include: { product: true } } },
+    });
   }
 
-  remove(id: number) {
-    const index = this.orders.findIndex((o) => o.id === id);
-    if (index === -1) throw new NotFoundException(`Order #${id} not found`);
-    this.orders.splice(index, 1);
-    return { message: `Order #${id} removed` };
+  async remove(companyId: string, id: string) {
+    await this.findOne(companyId, id);
+    await this.prisma.order.delete({ where: { id } });
+    return { message: `Order ${id} removed` };
   }
 }

@@ -1,0 +1,301 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── SYSTEM MODULES ───────────────────────────────────────────────────────────
+// Platform-level modules available to be assigned to companies (set by super admin)
+model SystemModule {
+  id          String   @id @default(uuid())
+  name        String   @unique  // "HR", "Financials", "CRM" …
+  slug        String   @unique  // "hr", "financials", "crm" …
+  description String?
+  icon        String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  companyModules CompanyModule[]
+  permissions    Permission[]
+
+  @@map("system_modules")
+}
+
+// ─── COMPANIES (TENANTS) ──────────────────────────────────────────────────────
+model Company {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique  // used in login: "acme-corp"
+  logoUrl   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users          User[]
+  roles          Role[]
+  companyModules CompanyModule[]
+  departments    Department[]
+  employees      Employee[]
+  products       Product[]
+  inventoryItems InventoryItem[]
+  orders         Order[]
+  invoices       Invoice[]
+
+  @@map("companies")
+}
+
+// ─── COMPANY ↔ MODULE ─────────────────────────────────────────────────────────
+model CompanyModule {
+  id         String   @id @default(uuid())
+  companyId  String
+  moduleId   String
+  isEnabled  Boolean  @default(true)
+  assignedAt DateTime @default(now())
+
+  company Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  module  SystemModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, moduleId])
+  @@map("company_modules")
+}
+
+// ─── USERS ────────────────────────────────────────────────────────────────────
+// companyId is null for platform-level super admins
+model User {
+  id           String    @id @default(uuid())
+  email        String
+  name         String
+  passwordHash String
+  companyId    String?
+  isSuperAdmin Boolean   @default(false)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  company   Company?   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userRoles UserRole[]
+
+  @@unique([email, companyId])
+  @@index([companyId])
+  @@map("users")
+}
+
+// ─── ROLES (PER COMPANY) ──────────────────────────────────────────────────────
+model Role {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  companyId   String
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@unique([name, companyId])
+  @@index([companyId])
+  @@map("roles")
+}
+
+// ─── USER ↔ ROLE ──────────────────────────────────────────────────────────────
+model UserRole {
+  userId     String
+  roleId     String
+  assignedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+// ─── PERMISSIONS ──────────────────────────────────────────────────────────────
+model Permission {
+  id       String           @id @default(uuid())
+  moduleId String
+  action   PermissionAction
+
+  module          SystemModule     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  rolePermissions RolePermission[]
+
+  @@unique([moduleId, action])
+  @@map("permissions")
+}
+
+enum PermissionAction {
+  VIEW
+  CREATE
+  UPDATE
+  DELETE
+  MANAGE
+}
+
+// ─── ROLE ↔ PERMISSION ────────────────────────────────────────────────────────
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ─── DEPARTMENTS ──────────────────────────────────────────────────────────────
+model Department {
+  id          String   @id @default(uuid())
+  companyId   String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employees Employee[]
+
+  @@unique([name, companyId])
+  @@index([companyId])
+  @@map("departments")
+}
+
+// ─── EMPLOYEES ────────────────────────────────────────────────────────────────
+model Employee {
+  id           String    @id @default(uuid())
+  companyId    String
+  name         String
+  email        String?
+  departmentId String?
+  position     String?
+  salary       Decimal?  @db.Decimal(12, 2)
+  hireDate     DateTime?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  company    Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department Department? @relation(fields: [departmentId], references: [id])
+
+  @@index([companyId])
+  @@map("employees")
+}
+
+// ─── PRODUCTS ─────────────────────────────────────────────────────────────────
+model Product {
+  id          String   @id @default(uuid())
+  companyId   String
+  name        String
+  description String?
+  price       Decimal  @db.Decimal(12, 2)
+  sku         String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company       Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem?
+  orderItems    OrderItem[]
+
+  @@index([companyId])
+  @@map("products")
+}
+
+// ─── INVENTORY ────────────────────────────────────────────────────────────────
+model InventoryItem {
+  id                String   @id @default(uuid())
+  companyId         String
+  productId         String   @unique
+  quantity          Int      @default(0)
+  warehouseLocation String?
+  lastUpdated       DateTime @default(now()) @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("inventory_items")
+}
+
+// ─── ORDERS ───────────────────────────────────────────────────────────────────
+model Order {
+  id        String      @id @default(uuid())
+  companyId String
+  status    OrderStatus @default(PENDING)
+  total     Decimal     @default(0) @db.Decimal(12, 2)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  company  Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  items    OrderItem[]
+  invoices Invoice[]
+
+  @@index([companyId])
+  @@map("orders")
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String
+  productId String
+  quantity  Int
+  unitPrice Decimal @db.Decimal(12, 2)
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+// ─── INVOICES ─────────────────────────────────────────────────────────────────
+model Invoice {
+  id        String        @id @default(uuid())
+  companyId String
+  orderId   String?
+  status    InvoiceStatus @default(DRAFT)
+  total     Decimal       @default(0) @db.Decimal(12, 2)
+  dueDate   DateTime?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  company Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  order   Order?        @relation(fields: [orderId], references: [id])
+  lines   InvoiceLine[]
+
+  @@index([companyId])
+  @@map("invoices")
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+model InvoiceLine {
+  id          String  @id @default(uuid())
+  invoiceId   String
+  description String
+  quantity    Int
+  unitPrice   Decimal @db.Decimal(12, 2)
+  total       Decimal @db.Decimal(12, 2)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_lines")
+}

@@ -1,15 +1,9 @@
-import { IsString, IsEnum } from 'class-validator';
+import { IsEnum } from 'class-validator';
+import { OrderStatus } from '@prisma/client';
 
-export enum OrderStatus {
-  PENDING = 'pending',
-  CONFIRMED = 'confirmed',
-  SHIPPED = 'shipped',
-  DELIVERED = 'delivered',
-  CANCELLED = 'cancelled',
-}
+export { OrderStatus };
 
 export class UpdateOrderDto {
   @IsEnum(OrderStatus)
-  @IsString()
   status: OrderStatus;
 }

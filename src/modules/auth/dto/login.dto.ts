@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsString, IsOptional, MinLength } from 'class-validator';
 
 export class LoginDto {
   @IsEmail()
@@ -7,4 +7,9 @@ export class LoginDto {
   @IsString()
   @MinLength(4)
   password: string;
+
+  // Company slug required for non-super-admin logins (e.g. "demo")
+  @IsString()
+  @IsOptional()
+  companySlug?: string;
 }

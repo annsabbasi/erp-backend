@@ -1,16 +1,31 @@
-import { IsNumber, IsDateString, IsOptional, IsString } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsDateString, IsUUID, IsArray, ValidateNested, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class InvoiceLineDto {
+  @IsString()
+  description: string;
+
+  @IsNumber()
+  @Min(1)
+  quantity: number;
+
+  @IsNumber()
+  @Min(0)
+  unitPrice: number;
+}
 
 export class CreateInvoiceDto {
-  @IsNumber()
-  orderId: number;
-
-  @IsNumber()
-  customerId: number;
+  @IsUUID()
+  @IsOptional()
+  orderId?: string;
 
   @IsDateString()
-  dueDate: string;
-
-  @IsString()
   @IsOptional()
-  notes?: string;
+  dueDate?: string;
+
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => InvoiceLineDto)
+  lines?: InvoiceLineDto[];
 }

@@ -1,38 +1,63 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 
 @Injectable()
 export class EmployeesService {
-  private employees: any[] = [];
+  constructor(private readonly prisma: PrismaService) {}
 
-  findAll() {
-    return this.employees;
+  findAll(companyId: string) {
+    return this.prisma.employee.findMany({
+      where: { companyId },
+      include: { department: true },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
-  findOne(id: number) {
-    const employee = this.employees.find((e) => e.id === id);
-    if (!employee) throw new NotFoundException(`Employee #${id} not found`);
+  async findOne(companyId: string, id: string) {
+    const employee = await this.prisma.employee.findFirst({
+      where: { id, companyId },
+      include: { department: true },
+    });
+    if (!employee) throw new NotFoundException(`Employee ${id} not found`);
     return employee;
   }
 
-  create(createEmployeeDto: CreateEmployeeDto) {
-    const employee = { id: Date.now(), ...createEmployeeDto };
-    this.employees.push(employee);
-    return employee;
+  create(companyId: string, dto: CreateEmployeeDto) {
+    return this.prisma.employee.create({
+      data: {
+        companyId,
+        name: dto.name,
+        email: dto.email,
+        departmentId: dto.departmentId,
+        position: dto.position,
+        salary: dto.salary,
+        hireDate: dto.hireDate ? new Date(dto.hireDate) : undefined,
+      },
+      include: { department: true },
+    });
   }
 
-  update(id: number, updateEmployeeDto: UpdateEmployeeDto) {
-    const index = this.employees.findIndex((e) => e.id === id);
-    if (index === -1) throw new NotFoundException(`Employee #${id} not found`);
-    this.employees[index] = { ...this.employees[index], ...updateEmployeeDto };
-    return this.employees[index];
+  async update(companyId: string, id: string, dto: UpdateEmployeeDto) {
+    await this.findOne(companyId, id);
+    return this.prisma.employee.update({
+      where: { id },
+      data: {
+        name: dto.name,
+        email: dto.email,
+        departmentId: dto.departmentId,
+        position: dto.position,
+        salary: dto.salary,
+        hireDate: dto.hireDate ? new Date(dto.hireDate) : undefined,
+      },
+      include: { department: true },
+    });
   }
 
-  remove(id: number) {
-    const index = this.employees.findIndex((e) => e.id === id);
-    if (index === -1) throw new NotFoundException(`Employee #${id} not found`);
-    this.employees.splice(index, 1);
-    return { message: `Employee #${id} removed` };
+  async remove(companyId: string, id: string) {
+    await this.findOne(companyId, id);
+    await this.prisma.employee.delete({ where: { id } });
+    return { message: `Employee ${id} removed` };
   }
 }

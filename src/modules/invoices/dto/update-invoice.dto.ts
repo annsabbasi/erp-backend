@@ -1,15 +1,9 @@
-import { IsString, IsEnum } from 'class-validator';
+import { IsEnum } from 'class-validator';
+import { InvoiceStatus } from '@prisma/client';
 
-export enum InvoiceStatus {
-  DRAFT = 'draft',
-  SENT = 'sent',
-  PAID = 'paid',
-  OVERDUE = 'overdue',
-  CANCELLED = 'cancelled',
-}
+export { InvoiceStatus };
 
 export class UpdateInvoiceDto {
   @IsEnum(InvoiceStatus)
-  @IsString()
   status: InvoiceStatus;
 }

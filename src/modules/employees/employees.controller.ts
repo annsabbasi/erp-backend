@@ -1,45 +1,44 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Put,
-  Delete,
-  Body,
-  Param,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { EmployeesService } from './employees.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequirePermission } from '../../common/decorators/permissions.decorator';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('employees')
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
 
+  @RequirePermission('hr:VIEW')
   @Get()
-  findAll() {
-    return this.employeesService.findAll();
+  findAll(@CurrentUser() user: any) {
+    return this.employeesService.findAll(user.companyId);
   }
 
+  @RequirePermission('hr:VIEW')
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.employeesService.findOne(+id);
+  findOne(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.employeesService.findOne(user.companyId, id);
   }
 
+  @RequirePermission('hr:CREATE')
   @Post()
-  create(@Body() createEmployeeDto: CreateEmployeeDto) {
-    return this.employeesService.create(createEmployeeDto);
+  create(@CurrentUser() user: any, @Body() dto: CreateEmployeeDto) {
+    return this.employeesService.create(user.companyId, dto);
   }
 
+  @RequirePermission('hr:UPDATE')
   @Put(':id')
-  update(@Param('id') id: string, @Body() updateEmployeeDto: UpdateEmployeeDto) {
-    return this.employeesService.update(+id, updateEmployeeDto);
+  update(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: UpdateEmployeeDto) {
+    return this.employeesService.update(user.companyId, id, dto);
   }
 
+  @RequirePermission('hr:DELETE')
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.employeesService.remove(+id);
+  remove(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.employeesService.remove(user.companyId, id);
   }
 }

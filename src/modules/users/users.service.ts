@@ -1,79 +1,82 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { Role } from '../../common/decorators/roles.decorator';
-
-export interface UserRecord {
-  id: number;
-  name: string;
-  email: string;
-  password: string;
-  role: Role;
-  modules: string[];
-}
+import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class UsersService {
-  private users: UserRecord[] = [
-    {
-      id: 1,
-      name: 'Super Admin',
-      email: 'admin@erp.com',
-      password: 'admin',
-      role: Role.SUPER_ADMIN,
-      modules: [], // super admin has access to everything, this field is ignored
-    },
-    {
-      id: 2,
-      name: 'Standard User',
-      email: 'user@erp.com',
-      password: 'user1',
-      role: Role.USER,
-      modules: ['Financials', 'CRM'],
-    },
-  ];
+  constructor(private readonly prisma: PrismaService) {}
 
-  findAll(): Omit<UserRecord, 'password'>[] {
-    return this.users.map(({ password, ...rest }) => rest);
+  async findAll(companyId: string) {
+    return this.prisma.user.findMany({
+      where: { companyId, deletedAt: null },
+      select: { id: true, name: true, email: true, isActive: true, createdAt: true,
+        userRoles: { select: { role: { select: { id: true, name: true } } } } },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
-  findOne(id: number): Omit<UserRecord, 'password'> {
-    const user = this.users.find((u) => u.id === id);
-    if (!user) throw new NotFoundException(`User #${id} not found`);
-    const { password, ...rest } = user;
-    return rest;
+  async findOne(id: string, companyId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id, companyId, deletedAt: null },
+      select: { id: true, name: true, email: true, isActive: true, createdAt: true,
+        userRoles: { select: { role: { select: { id: true, name: true } } } } },
+    });
+    if (!user) throw new NotFoundException(`User ${id} not found`);
+    return user;
   }
 
-  findByEmail(email: string): UserRecord | undefined {
-    return this.users.find((u) => u.email === email);
+  async create(dto: CreateUserDto, companyId: string) {
+    const existing = await this.prisma.user.findFirst({ where: { email: dto.email, companyId } });
+    if (existing) throw new BadRequestException('Email already in use in this company');
+
+    const passwordHash = await bcrypt.hash(dto.password, 12);
+    const user = await this.prisma.user.create({
+      data: { name: dto.name, email: dto.email, passwordHash, companyId },
+      select: { id: true, name: true, email: true, isActive: true, createdAt: true },
+    });
+
+    if (dto.roleIds?.length) {
+      await this.prisma.userRole.createMany({
+        data: dto.roleIds.map(roleId => ({ userId: user.id, roleId })),
+        skipDuplicates: true,
+      });
+    }
+
+    return user;
   }
 
-  create(createUserDto: CreateUserDto): Omit<UserRecord, 'password'> {
-    const user: UserRecord = {
-      id: Date.now(),
-      name: createUserDto.name,
-      email: createUserDto.email,
-      password: createUserDto.password,
-      role: createUserDto.role || Role.USER,
-      modules: createUserDto.modules || [],
-    };
-    this.users.push(user);
-    const { password, ...rest } = user;
-    return rest;
+  async update(id: string, dto: UpdateUserDto, companyId: string) {
+    await this.findOne(id, companyId);
+    const data: any = {};
+    if (dto.name) data.name = dto.name;
+    if (dto.email) data.email = dto.email;
+    if (dto.password) data.passwordHash = await bcrypt.hash(dto.password, 12);
+    if (typeof dto.isActive === 'boolean') data.isActive = dto.isActive;
+
+    const user = await this.prisma.user.update({
+      where: { id },
+      data,
+      select: { id: true, name: true, email: true, isActive: true, updatedAt: true },
+    });
+
+    if (dto.roleIds) {
+      await this.prisma.userRole.deleteMany({ where: { userId: id } });
+      if (dto.roleIds.length) {
+        await this.prisma.userRole.createMany({
+          data: dto.roleIds.map(roleId => ({ userId: id, roleId })),
+          skipDuplicates: true,
+        });
+      }
+    }
+
+    return user;
   }
 
-  update(id: number, updateUserDto: UpdateUserDto): Omit<UserRecord, 'password'> {
-    const index = this.users.findIndex((u) => u.id === id);
-    if (index === -1) throw new NotFoundException(`User #${id} not found`);
-    this.users[index] = { ...this.users[index], ...updateUserDto };
-    const { password, ...rest } = this.users[index];
-    return rest;
-  }
-
-  remove(id: number) {
-    const index = this.users.findIndex((u) => u.id === id);
-    if (index === -1) throw new NotFoundException(`User #${id} not found`);
-    this.users.splice(index, 1);
-    return { message: `User #${id} removed` };
+  async remove(id: string, companyId: string) {
+    await this.findOne(id, companyId);
+    await this.prisma.user.update({ where: { id }, data: { deletedAt: new Date() } });
+    return { message: `User ${id} deleted` };
   }
 }

@@ -1,45 +1,63 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
-import { UpdateInvoiceDto, InvoiceStatus } from './dto/update-invoice.dto';
+import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 
 @Injectable()
 export class InvoicesService {
-  private invoices: any[] = [];
-  private invoiceCounter = 1000;
+  constructor(private readonly prisma: PrismaService) {}
 
-  findAll() {
-    return this.invoices;
+  findAll(companyId: string) {
+    return this.prisma.invoice.findMany({
+      where: { companyId },
+      include: { lines: true, order: true },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
-  findOne(id: number) {
-    const invoice = this.invoices.find((i) => i.id === id);
-    if (!invoice) throw new NotFoundException(`Invoice #${id} not found`);
+  async findOne(companyId: string, id: string) {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { id, companyId },
+      include: { lines: true, order: true },
+    });
+    if (!invoice) throw new NotFoundException(`Invoice ${id} not found`);
     return invoice;
   }
 
-  create(dto: CreateInvoiceDto) {
-    const invoice = {
-      id: Date.now(),
-      invoiceNumber: `INV-${++this.invoiceCounter}`,
-      ...dto,
-      status: InvoiceStatus.DRAFT,
-      issuedAt: new Date().toISOString(),
-    };
-    this.invoices.push(invoice);
-    return invoice;
+  create(companyId: string, dto: CreateInvoiceDto) {
+    const lines = dto.lines ?? [];
+    const total = lines.reduce((sum, l) => sum + l.quantity * l.unitPrice, 0);
+    return this.prisma.invoice.create({
+      data: {
+        companyId,
+        orderId: dto.orderId,
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+        total,
+        lines: {
+          create: lines.map((l) => ({
+            description: l.description,
+            quantity: l.quantity,
+            unitPrice: l.unitPrice,
+            total: l.quantity * l.unitPrice,
+          })),
+        },
+      },
+      include: { lines: true, order: true },
+    });
   }
 
-  update(id: number, dto: UpdateInvoiceDto) {
-    const index = this.invoices.findIndex((i) => i.id === id);
-    if (index === -1) throw new NotFoundException(`Invoice #${id} not found`);
-    this.invoices[index] = { ...this.invoices[index], ...dto };
-    return this.invoices[index];
+  async update(companyId: string, id: string, dto: UpdateInvoiceDto) {
+    await this.findOne(companyId, id);
+    return this.prisma.invoice.update({
+      where: { id },
+      data: { status: dto.status },
+      include: { lines: true, order: true },
+    });
   }
 
-  remove(id: number) {
-    const index = this.invoices.findIndex((i) => i.id === id);
-    if (index === -1) throw new NotFoundException(`Invoice #${id} not found`);
-    this.invoices.splice(index, 1);
-    return { message: `Invoice #${id} removed` };
+  async remove(companyId: string, id: string) {
+    await this.findOne(companyId, id);
+    await this.prisma.invoice.delete({ where: { id } });
+    return { message: `Invoice ${id} removed` };
   }
 }
