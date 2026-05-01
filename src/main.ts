@@ -6,7 +6,7 @@ import { ResponseInterceptor } from './common/interceptors/response.interceptor'
 
 async function bootstrap() {
   if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
-    console.error('FATAL: JWT_SECRET environment variable is required in production');
+    console.error('FATAL: JWT_SECRET new changes environment variable is required in production');
     process.exit(1);
   }
 
