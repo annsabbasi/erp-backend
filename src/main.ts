@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, RequestMethod } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
@@ -12,7 +12,9 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule);
 
-  app.setGlobalPrefix('api/v1');
+  app.setGlobalPrefix('api/v1', {
+    exclude: [{ path: '', method: RequestMethod.GET }],
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -30,8 +32,8 @@ async function bootstrap() {
     credentials: true,
   });
 
-  const port = process.env.PORT || 3000;
+  const port = process.env.PORT || 3070;
   await app.listen(port, '0.0.0.0');
-  console.log(`ERP Backend is running on port ${port}`);
+  console.log(`ERP Backend is running on http://localhost:${port}`);
 }
 bootstrap();
