@@ -46,6 +46,7 @@ export class AuthService {
     }
 
     const permissions = user.isSuperAdmin ? ['*:*'] : this.extractPermissions(user.userRoles ?? []);
+    const enabledModuleSlugs = await this.getEnabledModuleSlugs(user.companyId ?? null);
 
     const payload: JwtPayload = {
       sub: user.id,
@@ -64,6 +65,7 @@ export class AuthService {
         companyId: user.companyId ?? null,
         isSuperAdmin: user.isSuperAdmin,
         permissions,
+        enabledModuleSlugs,
       },
     };
   }
@@ -101,6 +103,7 @@ export class AuthService {
     if (!user) throw new UnauthorizedException('User not found');
 
     const permissions = user.isSuperAdmin ? ['*:*'] : this.extractPermissions(user.userRoles);
+    const enabledModuleSlugs = await this.getEnabledModuleSlugs(user.companyId ?? null);
 
     return {
       id: user.id,
@@ -109,11 +112,21 @@ export class AuthService {
       companyId: user.companyId,
       isSuperAdmin: user.isSuperAdmin,
       permissions,
+      enabledModuleSlugs,
       roles: (user.userRoles ?? []).map((ur: any) => ({ id: ur.role.id, name: ur.role.name })),
     };
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
+  private async getEnabledModuleSlugs(companyId: string | null): Promise<string[]> {
+    if (!companyId) return [];
+    const rows = await this.prisma.companyModule.findMany({
+      where: { companyId, isEnabled: true },
+      include: { module: { select: { slug: true } } },
+    });
+    return rows.map((r) => r.module.slug);
+  }
+
   private userRolesInclude() {
     return {
       userRoles: {
