@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
+import { UserRoleType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -10,6 +11,8 @@ export interface JwtPayload {
   email: string;
   companyId: string | null;
   isSuperAdmin: boolean;
+  roleType: UserRoleType;
+  departmentId: string | null;
   permissions: string[];  // "moduleSlug:action" e.g. "hr:VIEW"
 }
 
@@ -32,7 +35,10 @@ export class AuthService {
 
       user = await this.prisma.user.findFirst({
         where: { email: dto.email, companyId: company.id, isActive: true, deletedAt: null },
-        include: this.userRolesInclude(),
+        include: {
+          ...this.userRolesInclude(),
+          userModules: { include: { module: true } }
+        },
       });
     } else {
       // Platform super admin — no company required
@@ -46,13 +52,15 @@ export class AuthService {
     }
 
     const permissions = user.isSuperAdmin ? ['*:*'] : this.extractPermissions(user.userRoles ?? []);
-    const enabledModuleSlugs = await this.getEnabledModuleSlugs(user.companyId ?? null);
+    const enabledModuleSlugs = await this.getUserModuleSlugs(user);
 
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
       companyId: user.companyId ?? null,
       isSuperAdmin: user.isSuperAdmin,
+      roleType: user.roleType,
+      departmentId: user.departmentId ?? null,
       permissions,
     };
 
@@ -64,6 +72,8 @@ export class AuthService {
         email: user.email,
         companyId: user.companyId ?? null,
         isSuperAdmin: user.isSuperAdmin,
+        roleType: user.roleType,
+        departmentId: user.departmentId ?? null,
         permissions,
         enabledModuleSlugs,
       },
@@ -98,12 +108,15 @@ export class AuthService {
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: this.userRolesInclude(),
+      include: {
+        ...this.userRolesInclude(),
+        userModules: { include: { module: true } }
+      },
     });
     if (!user) throw new UnauthorizedException('User not found');
 
     const permissions = user.isSuperAdmin ? ['*:*'] : this.extractPermissions(user.userRoles);
-    const enabledModuleSlugs = await this.getEnabledModuleSlugs(user.companyId ?? null);
+    const enabledModuleSlugs = await this.getUserModuleSlugs(user);
 
     return {
       id: user.id,
@@ -111,6 +124,8 @@ export class AuthService {
       email: user.email,
       companyId: user.companyId,
       isSuperAdmin: user.isSuperAdmin,
+      roleType: user.roleType,
+      departmentId: user.departmentId,
       permissions,
       enabledModuleSlugs,
       roles: (user.userRoles ?? []).map((ur: any) => ({ id: ur.role.id, name: ur.role.name })),
@@ -118,13 +133,35 @@ export class AuthService {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
-  private async getEnabledModuleSlugs(companyId: string | null): Promise<string[]> {
-    if (!companyId) return [];
-    const rows = await this.prisma.companyModule.findMany({
-      where: { companyId, isEnabled: true },
-      include: { module: { select: { slug: true } } },
+  private async getUserModuleSlugs(user: any): Promise<string[]> {
+    if (user.isSuperAdmin) {
+      const modules = await this.prisma.systemModule.findMany({ where: { isActive: true } });
+      return modules.map(m => m.slug);
+    }
+
+    if (!user.companyId) return [];
+
+    // If Sub-Admin or Super-Admin role within company, they see all company enabled modules
+    if (user.roleType === UserRoleType.SUB_ADMIN || user.roleType === UserRoleType.SUPER_ADMIN) {
+      const rows = await this.prisma.companyModule.findMany({
+        where: { companyId: user.companyId, isEnabled: true },
+        include: { module: { select: { slug: true } } },
+      });
+      return rows.map((r) => r.module.slug);
+    }
+
+    // Managers and Normal Users see only modules explicitly assigned to them
+    // AND enabled for the company
+    const companyEnabledModules = await this.prisma.companyModule.findMany({
+      where: { companyId: user.companyId, isEnabled: true },
+      select: { moduleId: true }
     });
-    return rows.map((r) => r.module.slug);
+    const enabledModuleIds = companyEnabledModules.map(cm => cm.moduleId);
+
+    const userModules = user.userModules || [];
+    return userModules
+      .filter((um: any) => enabledModuleIds.includes(um.moduleId))
+      .map((um: any) => um.module.slug);
   }
 
   private userRolesInclude() {

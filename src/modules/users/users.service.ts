@@ -11,8 +11,13 @@ export class UsersService {
   async findAll(companyId: string) {
     return this.prisma.user.findMany({
       where: { companyId, deletedAt: null },
-      select: { id: true, name: true, email: true, isActive: true, createdAt: true,
-        userRoles: { select: { role: { select: { id: true, name: true } } } } },
+      select: {
+        id: true, name: true, email: true, isActive: true, createdAt: true,
+        roleType: true, departmentId: true,
+        department: { select: { id: true, name: true } },
+        userRoles: { select: { role: { select: { id: true, name: true } } } },
+        userModules: { select: { module: { select: { id: true, name: true, slug: true } } } }
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -20,8 +25,13 @@ export class UsersService {
   async findOne(id: string, companyId: string) {
     const user = await this.prisma.user.findFirst({
       where: { id, companyId, deletedAt: null },
-      select: { id: true, name: true, email: true, isActive: true, createdAt: true,
-        userRoles: { select: { role: { select: { id: true, name: true } } } } },
+      select: {
+        id: true, name: true, email: true, isActive: true, createdAt: true,
+        roleType: true, departmentId: true,
+        department: { select: { id: true, name: true } },
+        userRoles: { select: { role: { select: { id: true, name: true } } } },
+        userModules: { select: { module: { select: { id: true, name: true, slug: true } } } }
+      },
     });
     if (!user) throw new NotFoundException(`User ${id} not found`);
     return user;
@@ -33,7 +43,14 @@ export class UsersService {
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const user = await this.prisma.user.create({
-      data: { name: dto.name, email: dto.email, passwordHash, companyId },
+      data: {
+        name: dto.name,
+        email: dto.email,
+        passwordHash,
+        companyId,
+        roleType: dto.roleType,
+        departmentId: dto.departmentId
+      },
       select: { id: true, name: true, email: true, isActive: true, createdAt: true },
     });
 
@@ -44,7 +61,14 @@ export class UsersService {
       });
     }
 
-    return user;
+    if (dto.moduleIds?.length) {
+      await this.prisma.userModule.createMany({
+        data: dto.moduleIds.map(moduleId => ({ userId: user.id, moduleId })),
+        skipDuplicates: true,
+      });
+    }
+
+    return this.findOne(user.id, companyId);
   }
 
   async update(id: string, dto: UpdateUserDto, companyId: string) {
@@ -54,11 +78,12 @@ export class UsersService {
     if (dto.email) data.email = dto.email;
     if (dto.password) data.passwordHash = await bcrypt.hash(dto.password, 12);
     if (typeof dto.isActive === 'boolean') data.isActive = dto.isActive;
+    if (dto.roleType) data.roleType = dto.roleType;
+    if (dto.departmentId !== undefined) data.departmentId = dto.departmentId;
 
     const user = await this.prisma.user.update({
       where: { id },
       data,
-      select: { id: true, name: true, email: true, isActive: true, updatedAt: true },
     });
 
     if (dto.roleIds) {
@@ -71,7 +96,17 @@ export class UsersService {
       }
     }
 
-    return user;
+    if (dto.moduleIds) {
+      await this.prisma.userModule.deleteMany({ where: { userId: id } });
+      if (dto.moduleIds.length) {
+        await this.prisma.userModule.createMany({
+          data: dto.moduleIds.map(moduleId => ({ userId: id, moduleId })),
+          skipDuplicates: true,
+        });
+      }
+    }
+
+    return this.findOne(id, companyId);
   }
 
   async remove(id: string, companyId: string) {

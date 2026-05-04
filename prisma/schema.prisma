@@ -21,6 +21,7 @@ model SystemModule {
 
   companyModules CompanyModule[]
   permissions    Permission[]
+  userModules    UserModule[]
 
   @@map("system_modules")
 }
@@ -63,6 +64,13 @@ model CompanyModule {
   @@map("company_modules")
 }
 
+enum UserRoleType {
+  SUPER_ADMIN
+  SUB_ADMIN
+  MANAGER
+  NORMAL_USER
+}
+
 // ─── USERS ────────────────────────────────────────────────────────────────────
 // companyId is null for platform-level super admins
 model User {
@@ -71,18 +79,34 @@ model User {
   name         String
   passwordHash String
   companyId    String?
+  roleType     UserRoleType @default(NORMAL_USER)
+  departmentId String?
   isSuperAdmin Boolean   @default(false)
   isActive     Boolean   @default(true)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   deletedAt    DateTime?
 
-  company   Company?   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  userRoles UserRole[]
+  company    Company?      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department Department?   @relation(fields: [departmentId], references: [id])
+  userRoles  UserRole[]
+  userModules UserModule[]
 
   @@unique([email, companyId])
   @@index([companyId])
   @@map("users")
+}
+
+model UserModule {
+  userId     String
+  moduleId   String
+  assignedAt DateTime @default(now())
+
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module SystemModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, moduleId])
+  @@map("user_modules")
 }
 
 // ─── ROLES (PER COMPANY) ──────────────────────────────────────────────────────
@@ -159,6 +183,7 @@ model Department {
 
   company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   employees Employee[]
+  users     User[]
 
   @@unique([name, companyId])
   @@index([companyId])
@@ -298,4 +323,20 @@ model InvoiceLine {
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@map("invoice_lines")
+}
+
+// ─── ACTIVITY LOGS ────────────────────────────────────────────────────────────
+model ActivityLog {
+  id        String   @id @default(uuid())
+  companyId String?
+  userId    String?
+  action    String
+  module    String?
+  details   Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([userId])
+  @@map("activity_logs")
 }
