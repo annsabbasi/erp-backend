@@ -115,6 +115,7 @@ model Role {
   name        String
   description String?
   companyId   String
+  domain      String?  // null = general; "HR" = HR-domain role; "FINANCE" etc.
   isDefault   Boolean  @default(false)
   createdAt   DateTime @default(now())
 

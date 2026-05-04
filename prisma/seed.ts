@@ -4,16 +4,22 @@ import * as bcrypt from 'bcryptjs';
 const prisma = new PrismaClient();
 
 const SYSTEM_MODULES = [
-  { name: 'Administration', slug: 'administration', description: 'User & system management', icon: 'Settings' },
-  { name: 'Financials',     slug: 'financials',     description: 'Accounting & financial reports', icon: 'DollarSign' },
-  { name: 'HR',             slug: 'hr',              description: 'Human Resources', icon: 'Users' },
-  { name: 'HR Payroll',     slug: 'hr-payroll',      description: 'Payroll management', icon: 'CreditCard' },
-  { name: 'CRM',            slug: 'crm',             description: 'Customer Relationship Management', icon: 'Briefcase' },
-  { name: 'Purchasing',     slug: 'purchasing',      description: 'Procurement & purchasing', icon: 'ShoppingCart' },
-  { name: 'Inventory',      slug: 'inventory',       description: 'Stock & warehouse management', icon: 'Package' },
-  { name: 'Banking',        slug: 'banking',         description: 'Banking & payments', icon: 'Landmark' },
-  { name: 'Reports',        slug: 'reports',         description: 'Business intelligence & reports', icon: 'BarChart' },
+  { name: 'Administration',       slug: 'administration',       description: 'User & system management',                  icon: 'Settings' },
+  { name: 'Financials',           slug: 'financials',           description: 'Accounting & financial reports',             icon: 'DollarSign' },
+  { name: 'HR',                   slug: 'hr',                   description: 'Human Resources core',                      icon: 'Users' },
+  { name: 'HR Payroll',           slug: 'hr-payroll',           description: 'Payroll management',                        icon: 'CreditCard' },
+  { name: 'HR Employee Records',  slug: 'hr-employee-records',  description: 'Employee master data & records',            icon: 'UserCheck' },
+  { name: 'HR Attendance',        slug: 'hr-attendance',        description: 'Attendance & time tracking',                icon: 'Clock' },
+  { name: 'HR Recruitment',       slug: 'hr-recruitment',       description: 'Hiring & recruitment workflows',            icon: 'UserPlus' },
+  { name: 'CRM',                  slug: 'crm',                  description: 'Customer Relationship Management',          icon: 'Briefcase' },
+  { name: 'Purchasing',           slug: 'purchasing',           description: 'Procurement & purchasing',                  icon: 'ShoppingCart' },
+  { name: 'Inventory',            slug: 'inventory',            description: 'Stock & warehouse management',              icon: 'Package' },
+  { name: 'Banking',              slug: 'banking',              description: 'Banking & payments',                        icon: 'Landmark' },
+  { name: 'Reports',              slug: 'reports',              description: 'Business intelligence & reports',           icon: 'BarChart' },
 ];
+
+// All slugs that belong to the HR domain
+const HR_MODULE_SLUGS = ['hr', 'hr-payroll', 'hr-employee-records', 'hr-attendance', 'hr-recruitment'];
 
 async function main() {
   console.log('🌱 Seeding database...');
@@ -115,6 +121,84 @@ async function main() {
     });
   }
 
+  // ── HR Domain Roles ────────────────────────────────────────────────────────
+  // HR Admin — full MANAGE over all HR sub-modules
+  const hrAdminRole = await prisma.role.upsert({
+    where: { name_companyId: { name: 'HR Admin', companyId: demoCompany.id } },
+    update: { domain: 'HR' },
+    create: {
+      name: 'HR Admin',
+      description: 'Full control over all HR modules and configurations',
+      companyId: demoCompany.id,
+      domain: 'HR',
+    },
+  });
+
+  const hrAllPerms = await prisma.permission.findMany({
+    where: { module: { slug: { in: HR_MODULE_SLUGS } } },
+  });
+  for (const perm of hrAllPerms) {
+    await prisma.rolePermission.upsert({
+      where: { roleId_permissionId: { roleId: hrAdminRole.id, permissionId: perm.id } },
+      update: {},
+      create: { roleId: hrAdminRole.id, permissionId: perm.id },
+    });
+  }
+
+  // HR Manager — CREATE/UPDATE/DELETE/VIEW on all HR sub-modules (no MANAGE)
+  const hrManagerRole = await prisma.role.upsert({
+    where: { name_companyId: { name: 'HR Manager', companyId: demoCompany.id } },
+    update: { domain: 'HR' },
+    create: {
+      name: 'HR Manager',
+      description: 'Elevated HR access: manage HR users and assign HR roles',
+      companyId: demoCompany.id,
+      domain: 'HR',
+    },
+  });
+
+  const hrManagerPerms = await prisma.permission.findMany({
+    where: {
+      module: { slug: { in: HR_MODULE_SLUGS } },
+      action: { in: [PermissionAction.VIEW, PermissionAction.CREATE, PermissionAction.UPDATE, PermissionAction.DELETE] },
+    },
+  });
+  for (const perm of hrManagerPerms) {
+    await prisma.rolePermission.upsert({
+      where: { roleId_permissionId: { roleId: hrManagerRole.id, permissionId: perm.id } },
+      update: {},
+      create: { roleId: hrManagerRole.id, permissionId: perm.id },
+    });
+  }
+
+  // HR Viewer — VIEW only on all HR sub-modules
+  const hrViewerRole = await prisma.role.upsert({
+    where: { name_companyId: { name: 'HR Viewer', companyId: demoCompany.id } },
+    update: { domain: 'HR' },
+    create: {
+      name: 'HR Viewer',
+      description: 'Read-only access to authorized HR data',
+      companyId: demoCompany.id,
+      domain: 'HR',
+    },
+  });
+
+  const hrViewPerms = await prisma.permission.findMany({
+    where: {
+      module: { slug: { in: HR_MODULE_SLUGS } },
+      action: PermissionAction.VIEW,
+    },
+  });
+  for (const perm of hrViewPerms) {
+    await prisma.rolePermission.upsert({
+      where: { roleId_permissionId: { roleId: hrViewerRole.id, permissionId: perm.id } },
+      update: {},
+      create: { roleId: hrViewerRole.id, permissionId: perm.id },
+    });
+  }
+
+  console.log('✅ HR domain roles seeded  →  HR Admin / HR Manager / HR Viewer');
+
   // ── Company Admin User ─────────────────────────────────────────────────────
   const companyAdminHash = await bcrypt.hash('password123', 12);
   const companyAdmin = await prisma.user.upsert({
@@ -152,6 +236,35 @@ async function main() {
     create: { userId: viewerUser.id, roleId: viewerRole.id },
   });
   console.log('✅ Viewer user seeded  →  viewer@demo.com / password123  (company: demo)');
+
+  // ── Demo HR Admin User ─────────────────────────────────────────────────────
+  const hrAdminHash = await bcrypt.hash('password123', 12);
+  const hrAdminUser = await prisma.user.upsert({
+    where: { email_companyId: { email: 'hradmin@demo.com', companyId: demoCompany.id } },
+    update: {},
+    create: {
+      email: 'hradmin@demo.com',
+      name: 'HR Administrator',
+      passwordHash: hrAdminHash,
+      companyId: demoCompany.id,
+    },
+  });
+  await prisma.userRole.upsert({
+    where: { userId_roleId: { userId: hrAdminUser.id, roleId: hrAdminRole.id } },
+    update: {},
+    create: { userId: hrAdminUser.id, roleId: hrAdminRole.id },
+  });
+
+  // Assign HR modules directly to HR Admin user
+  const hrModules = await prisma.systemModule.findMany({ where: { slug: { in: HR_MODULE_SLUGS } } });
+  for (const mod of hrModules) {
+    await prisma.userModule.upsert({
+      where: { userId_moduleId: { userId: hrAdminUser.id, moduleId: mod.id } },
+      update: {},
+      create: { userId: hrAdminUser.id, moduleId: mod.id },
+    });
+  }
+  console.log('✅ HR Admin user seeded  →  hradmin@demo.com / password123  (company: demo)');
 
   console.log('\n🎉 Seed complete!');
 }
