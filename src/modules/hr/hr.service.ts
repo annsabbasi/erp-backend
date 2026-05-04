@@ -142,7 +142,18 @@ export class HrService {
   }
 
   async findOneHrUser(id: string, companyId: string) {
-    const user = await this.prisma.user.findFirst({
+    const user = await this.fetchHrUserData(id, companyId);
+    if (!user) throw new NotFoundException(`HR user ${id} not found`);
+
+    if (user.userRoles.length === 0) {
+      throw new ForbiddenException(`User ${id} does not belong to the HR domain`);
+    }
+
+    return user;
+  }
+
+  private async fetchHrUserData(id: string, companyId: string) {
+    return this.prisma.user.findFirst({
       where: { id, companyId, deletedAt: null },
       select: {
         id: true, name: true, email: true, isActive: true, createdAt: true,
@@ -155,21 +166,17 @@ export class HrService {
         userModules: { select: { module: { select: { id: true, name: true, slug: true } } } },
       },
     });
-    if (!user) throw new NotFoundException(`HR user ${id} not found`);
-
-    const hasHrRole = user.userRoles.length > 0;
-    if (!hasHrRole) throw new ForbiddenException(`User ${id} does not belong to the HR domain`);
-
-    return user;
   }
 
   async createHrUser(dto: CreateHrUserDto, companyId: string) {
+    if (!dto.roleIds?.length) {
+      throw new BadRequestException('At least one HR role must be assigned when creating an HR user');
+    }
+
     const existing = await this.prisma.user.findFirst({ where: { email: dto.email, companyId } });
     if (existing) throw new BadRequestException('Email already in use in this company');
 
-    if (dto.roleIds?.length) {
-      await this.assertHrRolesOnly(dto.roleIds, companyId);
-    }
+    await this.assertHrRolesOnly(dto.roleIds, companyId);
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const user = await this.prisma.user.create({
@@ -196,8 +203,12 @@ export class HrService {
   }
 
   async updateHrUser(id: string, dto: UpdateHrUserDto, companyId: string) {
+    // Use the domain-enforcing lookup to confirm the user is an HR user before mutating.
     await this.findOneHrUser(id, companyId);
 
+    if (dto.roleIds !== undefined && dto.roleIds.length === 0) {
+      throw new BadRequestException('An HR user must retain at least one HR role');
+    }
     if (dto.roleIds?.length) {
       await this.assertHrRolesOnly(dto.roleIds, companyId);
     }
@@ -212,7 +223,7 @@ export class HrService {
     await this.prisma.user.update({ where: { id }, data });
 
     if (dto.roleIds !== undefined) {
-      // Only remove HR-domain roles; preserve any non-HR roles the user may hold
+      // Only remove HR-domain roles; preserve any non-HR roles the user may hold.
       const currentHrRoles = await this.prisma.userRole.findMany({
         where: { userId: id, role: { domain: HR_DOMAIN } },
         select: { roleId: true },
@@ -223,15 +234,17 @@ export class HrService {
           where: { userId: id, roleId: { in: currentHrRoleIds } },
         });
       }
-      if (dto.roleIds.length) {
-        await this.prisma.userRole.createMany({
-          data: dto.roleIds.map(roleId => ({ userId: id, roleId })),
-          skipDuplicates: true,
-        });
-      }
+      await this.prisma.userRole.createMany({
+        data: dto.roleIds.map(roleId => ({ userId: id, roleId })),
+        skipDuplicates: true,
+      });
     }
 
-    return this.findOneHrUser(id, companyId);
+    // Use the plain fetch so the response reflects the actual current state
+    // regardless of role changes — domain enforcement already happened above.
+    const updated = await this.fetchHrUserData(id, companyId);
+    if (!updated) throw new NotFoundException(`HR user ${id} not found after update`);
+    return updated;
   }
 
   async removeHrUser(id: string, companyId: string) {
