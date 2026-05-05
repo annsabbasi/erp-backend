@@ -7,8 +7,10 @@ import { CreateHrRoleDto } from './dto/create-hr-role.dto';
 import { CreateHrUserDto, UpdateHrUserDto } from './dto/create-hr-user.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
+import { RequireModule } from '../../common/decorators/module-access.decorator';
 
 // Super admins supply ?companyId; company users use their JWT companyId.
 function resolveCompanyId(user: any, qCompanyId?: string): string {
@@ -19,7 +21,8 @@ function resolveCompanyId(user: any, qCompanyId?: string): string {
   return user.companyId;
 }
 
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, ModuleAccessGuard)
+@RequireModule('hr')
 @Controller('hr')
 export class HrController {
   constructor(private readonly hrService: HrService) {}

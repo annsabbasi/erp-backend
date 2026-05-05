@@ -14,6 +14,7 @@ export interface JwtPayload {
   roleType: UserRoleType;
   departmentId: string | null;
   permissions: string[];  // "moduleSlug:action" e.g. "hr:VIEW"
+  enabledModuleSlugs: string[];
 }
 
 @Injectable()
@@ -62,6 +63,7 @@ export class AuthService {
       roleType: user.roleType,
       departmentId: user.departmentId ?? null,
       permissions,
+      enabledModuleSlugs,
     };
 
     return {
@@ -150,18 +152,30 @@ export class AuthService {
       return rows.map((r) => r.module.slug);
     }
 
-    // Managers and Normal Users see only modules explicitly assigned to them
-    // AND enabled for the company
-    const companyEnabledModules = await this.prisma.companyModule.findMany({
+    // Managers and Normal Users:
+    //   Module access = (modules assigned via UserModule)
+    //                 ∪ (modules referenced by permissions in any of the user's roles)
+    //   intersected with the company's enabled modules.
+    // Roles imply module access — assigning a role like "HR Manager" automatically
+    // makes the HR module visible without requiring a redundant module checkbox.
+    const companyEnabled = await this.prisma.companyModule.findMany({
       where: { companyId: user.companyId, isEnabled: true },
-      select: { moduleId: true }
+      include: { module: { select: { slug: true } } },
     });
-    const enabledModuleIds = companyEnabledModules.map(cm => cm.moduleId);
+    const companyEnabledSlugs = new Set(companyEnabled.map(cm => cm.module.slug));
 
-    const userModules = user.userModules || [];
-    return userModules
-      .filter((um: any) => enabledModuleIds.includes(um.moduleId))
-      .map((um: any) => um.module.slug);
+    const slugs = new Set<string>();
+    for (const um of user.userModules ?? []) {
+      if (um.module?.slug) slugs.add(um.module.slug);
+    }
+    for (const ur of user.userRoles ?? []) {
+      for (const rp of ur.role?.rolePermissions ?? []) {
+        const slug = rp.permission?.module?.slug;
+        if (slug) slugs.add(slug);
+      }
+    }
+
+    return [...slugs].filter(s => companyEnabledSlugs.has(s));
   }
 
   private userRolesInclude() {

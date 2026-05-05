@@ -41,6 +41,10 @@ export class UsersService {
     const existing = await this.prisma.user.findFirst({ where: { email: dto.email, companyId } });
     if (existing) throw new BadRequestException('Email already in use in this company');
 
+    if (dto.moduleIds?.length) {
+      await this.assertModulesEnabledForCompany(companyId, dto.moduleIds);
+    }
+
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const user = await this.prisma.user.create({
       data: {
@@ -97,6 +101,9 @@ export class UsersService {
     }
 
     if (dto.moduleIds) {
+      if (dto.moduleIds.length) {
+        await this.assertModulesEnabledForCompany(companyId, dto.moduleIds);
+      }
       await this.prisma.userModule.deleteMany({ where: { userId: id } });
       if (dto.moduleIds.length) {
         await this.prisma.userModule.createMany({
@@ -113,5 +120,15 @@ export class UsersService {
     await this.findOne(id, companyId);
     await this.prisma.user.update({ where: { id }, data: { deletedAt: new Date() } });
     return { message: `User ${id} deleted` };
+  }
+
+  private async assertModulesEnabledForCompany(companyId: string, moduleIds: string[]) {
+    const enabled = await this.prisma.companyModule.findMany({
+      where: { companyId, isEnabled: true, moduleId: { in: moduleIds } },
+      select: { moduleId: true },
+    });
+    if (enabled.length !== new Set(moduleIds).size) {
+      throw new BadRequestException('One or more modules are not enabled for this company');
+    }
   }
 }

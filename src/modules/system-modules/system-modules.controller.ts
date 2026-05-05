@@ -14,6 +14,13 @@ export class SystemModulesController {
   @Get()
   findAll() { return this.service.findAll(); }
 
+  // Returns only modules that are enabled for the given company.
+  // Used by user-creation forms so admins can only assign modules the company has subscribed to.
+  @Get('company/:companyId')
+  findEnabledForCompany(@Param('companyId') companyId: string) {
+    return this.service.findEnabledForCompany(companyId);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) { return this.service.findOne(id); }
 
