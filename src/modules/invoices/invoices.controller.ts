@@ -12,31 +12,31 @@ import { RequirePermission } from '../../common/decorators/permissions.decorator
 export class InvoicesController {
   constructor(private readonly invoicesService: InvoicesService) {}
 
-  @RequirePermission('financials:VIEW')
+  @RequirePermission('financials.view')
   @Get()
   findAll(@CurrentUser() user: any) {
     return this.invoicesService.findAll(user.companyId);
   }
 
-  @RequirePermission('financials:VIEW')
+  @RequirePermission('financials.view')
   @Get(':id')
   findOne(@CurrentUser() user: any, @Param('id') id: string) {
     return this.invoicesService.findOne(user.companyId, id);
   }
 
-  @RequirePermission('financials:CREATE')
+  @RequirePermission('financials.create')
   @Post()
   create(@CurrentUser() user: any, @Body() dto: CreateInvoiceDto) {
     return this.invoicesService.create(user.companyId, dto);
   }
 
-  @RequirePermission('financials:UPDATE')
+  @RequirePermission('financials.update')
   @Put(':id')
   update(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: UpdateInvoiceDto) {
     return this.invoicesService.update(user.companyId, id, dto);
   }
 
-  @RequirePermission('financials:DELETE')
+  @RequirePermission('financials.delete')
   @Delete(':id')
   remove(@CurrentUser() user: any, @Param('id') id: string) {
     return this.invoicesService.remove(user.companyId, id);

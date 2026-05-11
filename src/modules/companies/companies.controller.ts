@@ -1,62 +1,106 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Req,
+} from '@nestjs/common';
+import type { Request } from 'express';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import {
+  RequirePermission,
+  SuperAdminOnly,
+} from '../../common/decorators/permissions.decorator';
 import { CompaniesService } from './companies.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
-import { UpdateCompanyDto, AssignModulesDto } from './dto/update-company.dto';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { PermissionsGuard } from '../../common/guards/permissions.guard';
-import { RequirePermission, SuperAdminOnly } from '../../common/decorators/permissions.decorator';
+import { OnboardCompanyDto } from './dto/onboard-company.dto';
+import {
+  AssignModulesDto,
+  UpdateBrandingDto,
+  UpdateCompanyDto,
+} from './dto/update-company.dto';
 
-@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('companies')
 export class CompaniesController {
-  constructor(private readonly companiesService: CompaniesService) {}
+  constructor(private readonly companies: CompaniesService) {}
 
-  // Listing all companies is a platform-level operation.
   @SuperAdminOnly()
   @Get()
   findAll() {
-    return this.companiesService.findAll();
+    return this.companies.findAll();
   }
 
-  // Company admins can view their own company's details (module list, etc.).
-  @RequirePermission('administration:VIEW')
+  @RequirePermission('administration.view')
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.companiesService.findOne(id);
+    return this.companies.findOne(id);
   }
 
   @SuperAdminOnly()
   @Post()
   create(@Body() dto: CreateCompanyDto) {
-    return this.companiesService.create(dto);
+    return this.companies.create(dto);
+  }
+
+  @SuperAdminOnly()
+  @Post('onboard')
+  onboard(
+    @Body() dto: OnboardCompanyDto,
+    @CurrentUser() user: any,
+    @Req() req: Request,
+  ) {
+    return this.companies.onboard(dto, { actorId: user?.sub ?? null, ip: req.ip });
   }
 
   @SuperAdminOnly()
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateCompanyDto) {
-    return this.companiesService.update(id, dto);
+    return this.companies.update(id, dto);
+  }
+
+  @RequirePermission('tenancy.branding.update')
+  @Patch(':id/branding')
+  updateBranding(
+    @Param('id') id: string,
+    @Body() dto: UpdateBrandingDto,
+    @CurrentUser() user: any,
+    @Req() req: Request,
+  ) {
+    return this.companies.updateBranding(id, dto, { actorId: user?.sub ?? null, ip: req.ip });
   }
 
   @SuperAdminOnly()
   @Delete(':id')
   remove(@Param('id') id: string) {
-    return this.companiesService.remove(id);
+    return this.companies.remove(id);
   }
 
   @SuperAdminOnly()
   @Post(':id/modules')
-  assignModules(@Param('id') id: string, @Body() dto: AssignModulesDto) {
-    return this.companiesService.assignModules(id, dto);
+  assignModules(
+    @Param('id') id: string,
+    @Body() dto: AssignModulesDto,
+    @CurrentUser() user: any,
+    @Req() req: Request,
+  ) {
+    return this.companies.assignModules(id, dto, { actorId: user?.sub ?? null, ip: req.ip });
   }
 
-  // Company admins can toggle modules for their own company.
-  @RequirePermission('administration:MANAGE')
+  @RequirePermission('tenancy.module.activate')
   @Patch(':id/modules/:moduleId/toggle')
   toggleModule(
     @Param('id') companyId: string,
     @Param('moduleId') moduleId: string,
     @Body('isEnabled') isEnabled: boolean,
+    @CurrentUser() user: any,
+    @Req() req: Request,
   ) {
-    return this.companiesService.toggleModule(companyId, moduleId, isEnabled);
+    return this.companies.toggleModule(companyId, moduleId, isEnabled, {
+      actorId: user?.sub ?? null,
+      ip: req.ip,
+    });
   }
 }

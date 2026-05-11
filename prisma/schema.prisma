@@ -20,33 +20,76 @@ model SystemModule {
   createdAt   DateTime @default(now())
 
   companyModules CompanyModule[]
-  permissions    Permission[]
   userModules    UserModule[]
+  planModules    PlanModule[]
 
   @@map("system_modules")
 }
 
 // ─── COMPANIES (TENANTS) ──────────────────────────────────────────────────────
 model Company {
+  id              String   @id @default(uuid())
+  name            String
+  slug            String   @unique  // used in login: "acme-corp"
+  logoUrl         String?
+  isActive        Boolean  @default(true)
+
+  // Tenancy profile (Section 4.1).
+  industry        String?  // template key: "generic" | "construction" | "real_estate" | ...
+  country         String?  // ISO-3166 alpha-2
+  currency        String?  // ISO-4217 (e.g. "USD")
+  locale          String?  // e.g. "en-US"
+  timezone        String?  // IANA TZ
+  fiscalYearStart Int?     // 1-12 (month index)
+
+  // Per-tenant branding & terminology overrides
+  // { primaryColor, terminologyOverrides: { "Project": "Site", "Customer": "Resident" }, ... }
+  branding        Json?
+
+  templateApplied String?  // last industry template applied (for audit / re-apply)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  users            User[]
+  roles            Role[]
+  permissionSets   PermissionSet[]
+  companyModules   CompanyModule[]
+  departments      Department[]
+  branches         Branch[]
+  employees        Employee[]
+  products         Product[]
+  inventoryItems   InventoryItem[]
+  orders           Order[]
+  invoices         Invoice[]
+  subscription     Subscription?
+  billingInvoices  BillingInvoice[]
+
+  @@map("companies")
+}
+
+// ─── BRANCHES ─────────────────────────────────────────────────────────────────
+// Optional sub-division of a Company (regional offices, separate sites).
+// Inherits company configuration; users and resources can be branch-scoped.
+model Branch {
   id        String   @id @default(uuid())
+  companyId String
   name      String
-  slug      String   @unique  // used in login: "acme-corp"
-  logoUrl   String?
+  code      String?  // company-defined short code (e.g. "NYC", "PK-LHE")
+  address   String?
+  managerId String?
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users          User[]
-  roles          Role[]
-  companyModules CompanyModule[]
-  departments    Department[]
-  employees      Employee[]
-  products       Product[]
-  inventoryItems InventoryItem[]
-  orders         Order[]
-  invoices       Invoice[]
+  company     Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  manager     User?        @relation("BranchManager", fields: [managerId], references: [id])
+  users       User[]       @relation("UserBranch")
+  departments Department[]
 
-  @@map("companies")
+  @@unique([companyId, name])
+  @@index([companyId])
+  @@map("branches")
 }
 
 // ─── COMPANY ↔ MODULE ─────────────────────────────────────────────────────────
@@ -64,11 +107,16 @@ model CompanyModule {
   @@map("company_modules")
 }
 
+// Four-tier hierarchy from the master spec (Section 5.1).
+//   SUPER_ADMIN     — platform owner; lives outside any company (companyId = null)
+//   COMPANY_ADMIN   — highest authority within a single company
+//   DEPARTMENT_HEAD — runs a department; manages employees in it
+//   EMPLOYEE        — limited to own data + role-assigned modules
 enum UserRoleType {
   SUPER_ADMIN
-  SUB_ADMIN
-  MANAGER
-  NORMAL_USER
+  COMPANY_ADMIN
+  DEPARTMENT_HEAD
+  EMPLOYEE
 }
 
 // ─── USERS ────────────────────────────────────────────────────────────────────
@@ -79,22 +127,111 @@ model User {
   name         String
   passwordHash String
   companyId    String?
-  roleType     UserRoleType @default(NORMAL_USER)
+  roleType     UserRoleType @default(EMPLOYEE)
   departmentId String?
+  branchId     String?
   isSuperAdmin Boolean   @default(false)
   isActive     Boolean   @default(true)
+
+  // Auth lifecycle (Section 6.1 — IAM)
+  mfaEnabled            Boolean   @default(false)
+  mfaSecret             String?   // TOTP secret; populated when MFA is enrolled
+  lastLoginAt           DateTime?
+  lockedUntil           DateTime? // set after repeated failed logins
+  failedLoginAttempts   Int       @default(0)
+  passwordChangedAt     DateTime?
+
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   deletedAt    DateTime?
 
-  company    Company?      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  department Department?   @relation(fields: [departmentId], references: [id])
-  userRoles  UserRole[]
-  userModules UserModule[]
+  company        Company?       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department     Department?    @relation(fields: [departmentId], references: [id])
+  branch         Branch?        @relation("UserBranch", fields: [branchId], references: [id])
+  managedBranches Branch[]      @relation("BranchManager")
+  userRoles      UserRole[]
+  userModules    UserModule[]
+  refreshTokens  RefreshToken[]
+  authEvents     AuthEvent[]
 
   @@unique([email, companyId])
   @@index([companyId])
+  @@index([branchId])
   @@map("users")
+}
+
+// ─── AUTH: REFRESH TOKENS ─────────────────────────────────────────────────────
+// We store the SHA-256 hash of the refresh token, never the raw token.
+// On refresh, we rotate (revoke current, issue a new one and link via replacedBy).
+model RefreshToken {
+  id           String    @id @default(uuid())
+  userId       String
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?   @unique
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime  @default(now())
+
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replacedBy RefreshToken? @relation("TokenRotation", fields: [replacedById], references: [id])
+  replaces   RefreshToken? @relation("TokenRotation")
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ─── AUTH: LOGIN ATTEMPTS ─────────────────────────────────────────────────────
+// One row per attempt (success or failure). Drives lockout and security alerts.
+model LoginAttempt {
+  id            String   @id @default(uuid())
+  email         String
+  companySlug   String?
+  userId        String?  // null for unknown email or wrong company
+  success       Boolean
+  failureReason String?  // 'invalid_credentials' | 'locked' | 'inactive' | 'unknown_company'
+  ip            String?
+  userAgent     String?
+  attemptedAt   DateTime @default(now())
+
+  @@index([email])
+  @@index([userId])
+  @@index([attemptedAt])
+  @@map("login_attempts")
+}
+
+// ─── AUTH: AUTH EVENTS ────────────────────────────────────────────────────────
+// Lifecycle events for compliance and audit (Section 13.1).
+enum AuthEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  LOGOUT
+  TOKEN_REFRESHED
+  TOKEN_REVOKED
+  ACCOUNT_LOCKED
+  ACCOUNT_UNLOCKED
+  PASSWORD_CHANGED
+  MFA_ENROLLED
+  MFA_DISABLED
+}
+
+model AuthEvent {
+  id        String        @id @default(uuid())
+  userId    String?
+  type      AuthEventType
+  ip        String?
+  userAgent String?
+  metadata  Json?
+  at        DateTime      @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([type])
+  @@index([at])
+  @@map("auth_events")
 }
 
 model UserModule {
@@ -110,18 +247,27 @@ model UserModule {
 }
 
 // ─── ROLES (PER COMPANY) ──────────────────────────────────────────────────────
+// A Role is a named bundle of permissions, scoped to a Company. Roles can be
+// composed of one or more PermissionSets plus individual Permission overrides
+// (Section 5.3). Cloning is first-class: `sourceRoleId` records provenance.
 model Role {
-  id          String   @id @default(uuid())
-  name        String
-  description String?
-  companyId   String
-  domain      String?  // null = general; "HR" = HR-domain role; "FINANCE" etc.
-  isDefault   Boolean  @default(false)
-  createdAt   DateTime @default(now())
+  id           String          @id @default(uuid())
+  name         String
+  description  String?
+  companyId    String
+  domain       String?         // null = general; "HR" = HR-domain role; "FINANCE" etc.
+  isDefault    Boolean         @default(false)
+  defaultScope PermissionScope @default(ALL)
+  sourceRoleId String?         // populated when this role was cloned from another
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 
-  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  userRoles       UserRole[]
-  rolePermissions RolePermission[]
+  company            Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userRoles          UserRole[]
+  rolePermissions    RolePermission[]
+  rolePermissionSets RolePermissionSet[]
+  sourceRole         Role?               @relation("RoleClone", fields: [sourceRoleId], references: [id])
+  clones             Role[]              @relation("RoleClone")
 
   @@unique([name, companyId])
   @@index([companyId])
@@ -142,52 +288,119 @@ model UserRole {
 }
 
 // ─── PERMISSIONS ──────────────────────────────────────────────────────────────
+// Platform-defined catalog of capabilities (Section 5.3). Identifiers follow
+// resource.action — e.g. "hr.employee.create", "finance.invoice.read".
+// `moduleSlug` is denormalized (no FK) so we can ship permissions for a
+// module before the SystemModule row exists.
 model Permission {
-  id       String           @id @default(uuid())
-  moduleId String
-  action   PermissionAction
+  id          String   @id @default(uuid())
+  key         String   @unique
+  resource    String
+  action      String
+  moduleSlug  String
+  description String?
+  createdAt   DateTime @default(now())
 
-  module          SystemModule     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
   rolePermissions RolePermission[]
+  setItems        PermissionSetItem[]
 
-  @@unique([moduleId, action])
+  @@index([moduleSlug])
+  @@index([resource])
   @@map("permissions")
 }
 
-enum PermissionAction {
-  VIEW
-  CREATE
-  UPDATE
-  DELETE
-  MANAGE
+// ─── PERMISSION SCOPE ─────────────────────────────────────────────────────────
+// Captures the data-scope qualifier from Section 5.5: a holder of "view"
+// at scope DEPARTMENT can only see records in their department, etc.
+enum PermissionScope {
+  OWN
+  DEPARTMENT
+  BRANCH
+  ALL
+}
+
+// ─── PERMISSION SETS ──────────────────────────────────────────────────────────
+// Reusable bundles of (permission, scope) pairs that compose into Roles.
+// System sets are platform-wide templates ("hr.viewer", "hr.standard", etc.);
+// company sets are tenant-defined for organization-specific job functions.
+model PermissionSet {
+  id          String   @id @default(uuid())
+  key         String?  @unique  // populated only for system sets
+  name        String
+  description String?
+  isSystem    Boolean  @default(false)
+  companyId   String?  // null when isSystem; required for custom sets
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company           Company?            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  items             PermissionSetItem[]
+  rolePermissionSets RolePermissionSet[]
+
+  @@unique([name, companyId])
+  @@map("permission_sets")
+}
+
+model PermissionSetItem {
+  id           String          @id @default(uuid())
+  setId        String
+  permissionId String
+  scope        PermissionScope @default(ALL)
+
+  set        PermissionSet @relation(fields: [setId], references: [id], onDelete: Cascade)
+  permission Permission    @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([setId, permissionId, scope])
+  @@map("permission_set_items")
 }
 
 // ─── ROLE ↔ PERMISSION ────────────────────────────────────────────────────────
+// Direct (per-permission) assignment of capabilities to a role, with scope.
+// Same role may also inherit permissions via attached PermissionSets — the
+// resolver merges both, taking the broadest scope per key.
 model RolePermission {
+  id           String          @id @default(uuid())
   roleId       String
   permissionId String
+  scope        PermissionScope @default(ALL)
 
   role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
   permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
-  @@id([roleId, permissionId])
+  @@unique([roleId, permissionId, scope])
+  @@index([roleId])
   @@map("role_permissions")
+}
+
+// ─── ROLE ↔ PERMISSION SET ────────────────────────────────────────────────────
+model RolePermissionSet {
+  roleId String
+  setId  String
+
+  role Role          @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  set  PermissionSet @relation(fields: [setId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, setId])
+  @@map("role_permission_sets")
 }
 
 // ─── DEPARTMENTS ──────────────────────────────────────────────────────────────
 model Department {
   id          String   @id @default(uuid())
   companyId   String
+  branchId    String?
   name        String
   description String?
   createdAt   DateTime @default(now())
 
   company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch    Branch?    @relation(fields: [branchId], references: [id])
   employees Employee[]
   users     User[]
 
   @@unique([name, companyId])
   @@index([companyId])
+  @@index([branchId])
   @@map("departments")
 }
 
@@ -327,6 +540,8 @@ model InvoiceLine {
 }
 
 // ─── ACTIVITY LOGS ────────────────────────────────────────────────────────────
+// High-volume informational log (Section 6.12). For audit-grade records that
+// need before/after snapshots and tamper-evidence, see AuditEvent below.
 model ActivityLog {
   id        String   @id @default(uuid())
   companyId String?
@@ -339,5 +554,206 @@ model ActivityLog {
 
   @@index([companyId])
   @@index([userId])
+  @@index([createdAt])
   @@map("activity_logs")
+}
+
+// ─── AUDIT EVENTS ─────────────────────────────────────────────────────────────
+// Immutable, append-only audit log for sensitive operations (Section 6.12).
+//
+//   • `before` / `after` capture entity snapshots for change forensics.
+//   • `hash` is a SHA-256 of the canonicalized record content.
+//   • `chainHash` links to the previous event's `hash` for the same company —
+//     a tamper attempt requires rewriting the chain from that point forward.
+//   • Records here have a long retention by default (7 years) and are only
+//     ever deleted via the RetentionPolicy enforcement runner.
+model AuditEvent {
+  id          String   @id @default(uuid())
+  companyId   String?
+  actorId     String?
+  action      String   // canonical event key, e.g. "role.created"
+  refType     String?  // e.g. "role", "subscription", "user"
+  refId       String?
+  before      Json?
+  after       Json?
+  ip          String?
+  userAgent   String?
+  requestId   String?
+  hash        String   // SHA-256 of canonical(record)
+  chainHash   String?  // hash of the prior event for this company
+  at          DateTime @default(now())
+
+  @@index([companyId, at])
+  @@index([actorId])
+  @@index([refType, refId])
+  @@index([action])
+  @@map("audit_events")
+}
+
+// ─── RETENTION POLICY ─────────────────────────────────────────────────────────
+// Per-dataClass retention windows (Section 13.5). The RetentionService reads
+// these and deletes records older than `retentionDays`.
+model RetentionPolicy {
+  id            String   @id @default(uuid())
+  dataClass     String   @unique
+  retentionDays Int
+  isEnforced    Boolean  @default(true)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("retention_policies")
+}
+
+// ─── PLANS (Subscription tiers — Section 4.2) ─────────────────────────────────
+model Plan {
+  id            String   @id @default(uuid())
+  key           String   @unique  // "starter" | "business" | "premium" | "enterprise"
+  name          String
+  description   String?
+  isPublic      Boolean  @default(true)   // shown in self-service signup
+  isActive      Boolean  @default(true)
+  monthlyPrice  Int?     // minor units (cents) — null = custom-quoted
+  annualPrice   Int?     // minor units
+  currency      String   @default("USD")
+  maxUsers      Int?     // null = unlimited (Enterprise)
+  trialDays     Int      @default(14)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  modules       PlanModule[]
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+// Modules included in a plan. A subscription's effective module set is the
+// union of (PlanModule for plan) — used to gate company module activation.
+model PlanModule {
+  planId   String
+  moduleId String
+
+  plan   Plan         @relation(fields: [planId], references: [id], onDelete: Cascade)
+  module SystemModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@id([planId, moduleId])
+  @@map("plan_modules")
+}
+
+// ─── SUBSCRIPTIONS ────────────────────────────────────────────────────────────
+enum BillingInterval {
+  MONTHLY
+  ANNUAL
+}
+
+// Lifecycle from Section 4.4:
+//   trial → active → past_due → suspended → cancelled → archived
+//                  ↘ active (on payment)    ↗ active (manual reactivation)
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+  CANCELLED
+  ARCHIVED
+}
+
+model Subscription {
+  id                  String             @id @default(uuid())
+  companyId           String             @unique
+  planId              String
+  status              SubscriptionStatus @default(TRIAL)
+  billingInterval     BillingInterval    @default(MONTHLY)
+  // Period boundaries (manually set; integrate with Stripe later).
+  trialEndsAt         DateTime?
+  currentPeriodStart  DateTime?
+  currentPeriodEnd    DateTime?
+  // Lifecycle audit timestamps.
+  startedAt           DateTime           @default(now())
+  pastDueAt           DateTime?
+  suspendedAt         DateTime?
+  cancelledAt         DateTime?
+  archivedAt          DateTime?
+  // Per-tenant overrides on the plan defaults.
+  seatsOverride       Int?               // null = use plan.maxUsers
+  autoRenew           Boolean            @default(true)
+  notes               String?
+
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  company Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  plan    Plan              @relation(fields: [planId], references: [id])
+  events  SubscriptionEvent[]
+  invoices BillingInvoice[]
+
+  @@index([planId])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+model SubscriptionEvent {
+  id             String              @id @default(uuid())
+  subscriptionId String
+  fromStatus     SubscriptionStatus?
+  toStatus       SubscriptionStatus
+  reason         String?
+  actorId        String?              // null = system
+  occurredAt     DateTime             @default(now())
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@map("subscription_events")
+}
+
+// ─── BILLING INVOICES (manual; Stripe integration deferred) ───────────────────
+enum BillingInvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  VOID
+  REFUNDED
+}
+
+model BillingInvoice {
+  id              String               @id @default(uuid())
+  companyId       String
+  subscriptionId  String?
+  number          String               @unique
+  status          BillingInvoiceStatus @default(DRAFT)
+  amountMinor     Int                  // total in minor units (e.g. cents)
+  currency        String               @default("USD")
+  periodStart     DateTime?
+  periodEnd       DateTime?
+  issuedAt        DateTime?
+  dueAt           DateTime?
+  paidAt          DateTime?
+  notes           String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  company      Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  subscription Subscription?   @relation(fields: [subscriptionId], references: [id])
+  payments     BillingPayment[]
+
+  @@index([companyId])
+  @@index([subscriptionId])
+  @@map("billing_invoices")
+}
+
+model BillingPayment {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  amountMinor Int
+  currency    String   @default("USD")
+  method      String?  // "manual" | "stripe" | "wire" — string to avoid lock-in
+  reference   String?
+  receivedAt  DateTime @default(now())
+
+  invoice BillingInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("billing_payments")
 }

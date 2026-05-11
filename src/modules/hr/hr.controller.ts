@@ -28,31 +28,31 @@ export class HrController {
   // hr:VIEW   → HR Viewer, HR Manager, HR Admin
   // hr:MANAGE → HR Admin only
 
-  @RequirePermission('hr:VIEW')
+  @RequirePermission('hr.view')
   @Get('roles')
   findAllHrRoles(@CurrentUser() user: any, @Query('companyId') cid?: string) {
     return this.hrService.findAllHrRoles(resolveCompanyId(user, cid));
   }
 
-  @RequirePermission('hr:VIEW')
+  @RequirePermission('hr.view')
   @Get('roles/permissions/available')
   getHrAvailablePermissions(@CurrentUser() user: any, @Query('companyId') cid?: string) {
     return this.hrService.getHrAvailablePermissions(resolveCompanyId(user, cid));
   }
 
-  @RequirePermission('hr:VIEW')
+  @RequirePermission('hr.view')
   @Get('roles/:id')
   findOneHrRole(@Param('id') id: string, @CurrentUser() user: any, @Query('companyId') cid?: string) {
     return this.hrService.findOneHrRole(id, resolveCompanyId(user, cid));
   }
 
-  @RequirePermission('hr:MANAGE')
+  @RequirePermission('hr.manage')
   @Post('roles')
   createHrRole(@Body() dto: CreateHrRoleDto, @CurrentUser() user: any, @Query('companyId') cid?: string) {
     return this.hrService.createHrRole(dto, resolveCompanyId(user, cid));
   }
 
-  @RequirePermission('hr:MANAGE')
+  @RequirePermission('hr.manage')
   @Patch('roles/:id')
   updateHrRole(
     @Param('id') id: string,
@@ -63,7 +63,7 @@ export class HrController {
     return this.hrService.updateHrRole(id, dto, resolveCompanyId(user, cid));
   }
 
-  @RequirePermission('hr:MANAGE')
+  @RequirePermission('hr.manage')
   @Delete('roles/:id')
   removeHrRole(@Param('id') id: string, @CurrentUser() user: any, @Query('companyId') cid?: string) {
     return this.hrService.removeHrRole(id, resolveCompanyId(user, cid));
@@ -76,25 +76,25 @@ export class HrController {
   // hr:DELETE → HR Manager + Admin can deactivate users
   // hr:MANAGE → HR Admin can reassign roles
 
-  @RequirePermission('hr:VIEW')
+  @RequirePermission('hr.view')
   @Get('users')
   findHrUsers(@CurrentUser() user: any, @Query('companyId') cid?: string) {
     return this.hrService.findHrUsers(resolveCompanyId(user, cid));
   }
 
-  @RequirePermission('hr:VIEW')
+  @RequirePermission('hr.view')
   @Get('users/:id')
   findOneHrUser(@Param('id') id: string, @CurrentUser() user: any, @Query('companyId') cid?: string) {
     return this.hrService.findOneHrUser(id, resolveCompanyId(user, cid));
   }
 
-  @RequirePermission('hr:CREATE')
+  @RequirePermission('hr.create')
   @Post('users')
   createHrUser(@Body() dto: CreateHrUserDto, @CurrentUser() user: any, @Query('companyId') cid?: string) {
     return this.hrService.createHrUser(dto, resolveCompanyId(user, cid));
   }
 
-  @RequirePermission('hr:UPDATE')
+  @RequirePermission('hr.update')
   @Patch('users/:id')
   updateHrUser(
     @Param('id') id: string,
@@ -105,7 +105,7 @@ export class HrController {
     return this.hrService.updateHrUser(id, dto, resolveCompanyId(user, cid));
   }
 
-  @RequirePermission('hr:DELETE')
+  @RequirePermission('hr.delete')
   @Delete('users/:id')
   removeHrUser(@Param('id') id: string, @CurrentUser() user: any, @Query('companyId') cid?: string) {
     return this.hrService.removeHrUser(id, resolveCompanyId(user, cid));
@@ -114,7 +114,7 @@ export class HrController {
   // ── Seed Default Roles ─────────────────────────────────────────────────────
   // Only HR Admin (hr:MANAGE) or a company Sub-Admin can trigger this.
 
-  @RequirePermission('hr:MANAGE')
+  @RequirePermission('hr.manage')
   @Post('seed-defaults')
   seedDefaultHrRoles(@CurrentUser() user: any, @Query('companyId') cid?: string) {
     return this.hrService.seedDefaultHrRoles(resolveCompanyId(user, cid));

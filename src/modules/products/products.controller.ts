@@ -12,31 +12,31 @@ import { RequirePermission } from '../../common/decorators/permissions.decorator
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
-  @RequirePermission('inventory:VIEW')
+  @RequirePermission('inventory.view')
   @Get()
   findAll(@CurrentUser() user: any) {
     return this.productsService.findAll(user.companyId);
   }
 
-  @RequirePermission('inventory:VIEW')
+  @RequirePermission('inventory.view')
   @Get(':id')
   findOne(@CurrentUser() user: any, @Param('id') id: string) {
     return this.productsService.findOne(user.companyId, id);
   }
 
-  @RequirePermission('inventory:CREATE')
+  @RequirePermission('inventory.create')
   @Post()
   create(@CurrentUser() user: any, @Body() dto: CreateProductDto) {
     return this.productsService.create(user.companyId, dto);
   }
 
-  @RequirePermission('inventory:UPDATE')
+  @RequirePermission('inventory.update')
   @Put(':id')
   update(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: UpdateProductDto) {
     return this.productsService.update(user.companyId, id, dto);
   }
 
-  @RequirePermission('inventory:DELETE')
+  @RequirePermission('inventory.delete')
   @Delete(':id')
   remove(@CurrentUser() user: any, @Param('id') id: string) {
     return this.productsService.remove(user.companyId, id);

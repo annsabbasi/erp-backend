@@ -1,4 +1,13 @@
-import { IsString, IsOptional, IsUrl, IsBoolean, Matches } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Matches,
+  Max,
+  Min,
+} from 'class-validator';
 
 export class CreateCompanyDto {
   @IsString()
@@ -15,4 +24,30 @@ export class CreateCompanyDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @IsString()
+  @IsOptional()
+  industry?: string;
+
+  @IsString()
+  @IsOptional()
+  country?: string;
+
+  @IsString()
+  @IsOptional()
+  currency?: string;
+
+  @IsString()
+  @IsOptional()
+  locale?: string;
+
+  @IsString()
+  @IsOptional()
+  timezone?: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  @IsOptional()
+  fiscalYearStart?: number;
 }

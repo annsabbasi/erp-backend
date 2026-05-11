@@ -21,31 +21,31 @@ function resolveCompanyId(user: any, qCompanyId?: string): string {
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @RequirePermission('administration:VIEW')
+  @RequirePermission('administration.view')
   @Get()
   findAll(@CurrentUser() user: any, @Query('companyId') qCompanyId?: string) {
     return this.usersService.findAll(resolveCompanyId(user, qCompanyId));
   }
 
-  @RequirePermission('administration:VIEW')
+  @RequirePermission('administration.view')
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() user: any, @Query('companyId') qCompanyId?: string) {
     return this.usersService.findOne(id, resolveCompanyId(user, qCompanyId));
   }
 
-  @RequirePermission('administration:CREATE')
+  @RequirePermission('administration.create')
   @Post()
   create(@Body() dto: CreateUserDto, @CurrentUser() user: any, @Query('companyId') qCompanyId?: string) {
     return this.usersService.create(dto, resolveCompanyId(user, qCompanyId));
   }
 
-  @RequirePermission('administration:UPDATE')
+  @RequirePermission('administration.update')
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateUserDto, @CurrentUser() user: any, @Query('companyId') qCompanyId?: string) {
     return this.usersService.update(id, dto, resolveCompanyId(user, qCompanyId));
   }
 
-  @RequirePermission('administration:DELETE')
+  @RequirePermission('administration.delete')
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: any, @Query('companyId') qCompanyId?: string) {
     return this.usersService.remove(id, resolveCompanyId(user, qCompanyId));

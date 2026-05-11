@@ -1,6 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateModuleDto } from './dto/create-module.dto';
+
+const STD_ACTIONS = ['view', 'create', 'update', 'delete', 'manage'] as const;
 
 @Injectable()
 export class SystemModulesService {
@@ -14,12 +16,13 @@ export class SystemModulesService {
   }
 
   async findOne(id: string) {
-    const mod = await this.prisma.systemModule.findUnique({
-      where: { id },
-      include: { permissions: true },
-    });
+    const mod = await this.prisma.systemModule.findUnique({ where: { id } });
     if (!mod) throw new NotFoundException(`Module ${id} not found`);
-    return mod;
+    const permissions = await this.prisma.permission.findMany({
+      where: { moduleSlug: mod.slug },
+      orderBy: [{ resource: 'asc' }, { action: 'asc' }],
+    });
+    return { ...mod, permissions };
   }
 
   async create(dto: CreateModuleDto) {
@@ -28,10 +31,17 @@ export class SystemModulesService {
 
     const mod = await this.prisma.systemModule.create({ data: dto });
 
-    // Auto-create all permission actions for this module
-    const { PermissionAction } = await import('@prisma/client');
+    // Auto-seed the standard CRUD permission keys for this module so existing
+    // routes have something to gate on. Fine-grained permissions are added
+    // later via the PERMISSION_CATALOG seed file.
     await this.prisma.permission.createMany({
-      data: Object.values(PermissionAction).map(action => ({ moduleId: mod.id, action })),
+      data: STD_ACTIONS.map((action) => ({
+        key: `${mod.slug}.${action}`,
+        resource: mod.slug,
+        action,
+        moduleSlug: mod.slug,
+        description: `${action.charAt(0).toUpperCase() + action.slice(1)} ${mod.name}`,
+      })),
       skipDuplicates: true,
     });
 

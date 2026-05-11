@@ -1,8 +1,17 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
 import configuration from './config/configuration';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+
+// Common
+import { TenantContextModule } from './common/context/tenant-context.module';
+import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { PermissionsGuard } from './common/guards/permissions.guard';
+
+// Audit (global so any module can inject AuditService)
+import { AuditModule } from './modules/audit/audit.module';
 
 // Infrastructure
 import { PrismaModule } from './modules/prisma/prisma.module';
@@ -11,11 +20,17 @@ import { SupabaseModule } from './modules/supabase/supabase.module';
 // Core / Auth
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
+import { PermissionsModule } from './modules/permissions/permissions.module';
+import { PermissionSetsModule } from './modules/permission-sets/permission-sets.module';
 
 // Multi-tenant management
 import { CompaniesModule } from './modules/companies/companies.module';
 import { SystemModulesModule } from './modules/system-modules/system-modules.module';
 import { RolesModule } from './modules/roles/roles.module';
+import { TenancyModule } from './modules/tenancy/tenancy.module';
+import { PlansModule } from './modules/plans/plans.module';
+import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
+import { BillingModule } from './modules/billing/billing.module';
 
 // Domain modules
 import { EmployeesModule } from './modules/employees/employees.module';
@@ -30,18 +45,28 @@ import { HrModule } from './modules/hr/hr.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
 
+    // Common (global)
+    TenantContextModule,
+    AuditModule,
+
     // Infrastructure (global — available everywhere)
     PrismaModule,
     SupabaseModule,
 
-    // Auth & Users
+    // Auth, Users & Authorization
+    PermissionsModule,
+    PermissionSetsModule,
     AuthModule,
     UsersModule,
 
     // Multi-tenant core
+    PlansModule,
+    SubscriptionsModule,
+    TenancyModule,
     CompaniesModule,
     SystemModulesModule,
     RolesModule,
+    BillingModule,
 
     // Domain
     EmployeesModule,
@@ -53,6 +78,12 @@ import { HrModule } from './modules/hr/hr.module';
     HrModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    // Global authentication & authorization. Routes opt out via @Public()
+    // and gate themselves via @RequirePermission(...).
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
+  ],
 })
 export class AppModule {}

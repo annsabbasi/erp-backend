@@ -11,37 +11,37 @@ import { RequirePermission } from '../../common/decorators/permissions.decorator
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
-  @RequirePermission('inventory:VIEW')
+  @RequirePermission('inventory.view')
   @Get()
   findAll() {
     return this.inventoryService.findAll();
   }
 
-  @RequirePermission('inventory:VIEW')
+  @RequirePermission('inventory.view')
   @Get('low-stock')
   findLowStock() {
     return this.inventoryService.findLowStock();
   }
 
-  @RequirePermission('inventory:VIEW')
+  @RequirePermission('inventory.view')
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.inventoryService.findOne(+id);
   }
 
-  @RequirePermission('inventory:CREATE')
+  @RequirePermission('inventory.create')
   @Post()
   create(@Body() dto: CreateInventoryDto) {
     return this.inventoryService.create(dto);
   }
 
-  @RequirePermission('inventory:UPDATE')
+  @RequirePermission('inventory.update')
   @Put(':id')
   update(@Param('id') id: string, @Body() dto: UpdateInventoryDto) {
     return this.inventoryService.update(+id, dto);
   }
 
-  @RequirePermission('inventory:DELETE')
+  @RequirePermission('inventory.delete')
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.inventoryService.remove(+id);

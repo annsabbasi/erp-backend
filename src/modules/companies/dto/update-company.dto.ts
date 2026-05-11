@@ -1,4 +1,14 @@
-import { IsString, IsOptional, IsUrl, IsBoolean, IsArray } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Max,
+  Min,
+} from 'class-validator';
 
 export class UpdateCompanyDto {
   @IsString()
@@ -12,6 +22,37 @@ export class UpdateCompanyDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @IsString()
+  @IsOptional()
+  industry?: string;
+
+  @IsString()
+  @IsOptional()
+  country?: string;
+
+  @IsString()
+  @IsOptional()
+  currency?: string;
+
+  @IsString()
+  @IsOptional()
+  locale?: string;
+
+  @IsString()
+  @IsOptional()
+  timezone?: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  @IsOptional()
+  fiscalYearStart?: number;
+}
+
+export class UpdateBrandingDto {
+  @IsObject()
+  branding: Record<string, unknown>;
 }
 
 export class AssignModulesDto {

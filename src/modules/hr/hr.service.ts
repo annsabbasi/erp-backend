@@ -1,11 +1,11 @@
 import {
-  Injectable,
-  NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Injectable,
+  NotFoundException,
 } from '@nestjs/common';
+import { PermissionScope } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
-import { PermissionAction } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateHrRoleDto } from './dto/create-hr-role.dto';
 import { CreateHrUserDto, UpdateHrUserDto } from './dto/create-hr-user.dto';
@@ -13,6 +13,14 @@ import { CreateHrUserDto, UpdateHrUserDto } from './dto/create-hr-user.dto';
 const HR_DOMAIN = 'HR';
 const HR_MODULE_SLUGS = ['hr', 'hr-payroll', 'hr-employee-records', 'hr-attendance', 'hr-recruitment'];
 
+/**
+ * HR-domain wrapper around Roles + Users.
+ *
+ * Mirrors the platform-level RolesService but locks reads/writes to the HR
+ * domain — i.e. roles whose `domain = "HR"` and the users assigned to them.
+ * Permission references use the platform Permission catalog filtered to
+ * HR-module slugs.
+ */
 @Injectable()
 export class HrService {
   constructor(private readonly prisma: PrismaService) {}
@@ -22,10 +30,7 @@ export class HrService {
   findAllHrRoles(companyId: string) {
     return this.prisma.role.findMany({
       where: { companyId, domain: HR_DOMAIN },
-      include: {
-        _count: { select: { userRoles: true } },
-        rolePermissions: { include: { permission: { include: { module: true } } } },
-      },
+      include: this.roleInclude(),
       orderBy: { createdAt: 'asc' },
     });
   }
@@ -34,7 +39,7 @@ export class HrService {
     const role = await this.prisma.role.findFirst({
       where: { id, companyId, domain: HR_DOMAIN },
       include: {
-        rolePermissions: { include: { permission: { include: { module: true } } } },
+        ...this.roleInclude(),
         userRoles: { include: { user: { select: { id: true, name: true, email: true } } } },
       },
     });
@@ -62,7 +67,11 @@ export class HrService {
 
     if (dto.permissionIds?.length) {
       await this.prisma.rolePermission.createMany({
-        data: dto.permissionIds.map(permissionId => ({ roleId: role.id, permissionId })),
+        data: dto.permissionIds.map((permissionId) => ({
+          roleId: role.id,
+          permissionId,
+          scope: PermissionScope.ALL,
+        })),
         skipDuplicates: true,
       });
     }
@@ -84,7 +93,11 @@ export class HrService {
       await this.prisma.rolePermission.deleteMany({ where: { roleId: id } });
       if (permissionIds.length) {
         await this.prisma.rolePermission.createMany({
-          data: permissionIds.map(permissionId => ({ roleId: id, permissionId })),
+          data: permissionIds.map((permissionId) => ({
+            roleId: id,
+            permissionId,
+            scope: PermissionScope.ALL,
+          })),
           skipDuplicates: true,
         });
       }
@@ -102,19 +115,17 @@ export class HrService {
   // ── HR Permission Discovery ───────────────────────────────────────────────
 
   async getHrAvailablePermissions(companyId: string) {
-    // Only return permissions for HR-domain modules that are enabled for this company
-    const companyModules = await this.prisma.companyModule.findMany({
+    const enabled = await this.prisma.companyModule.findMany({
       where: { companyId, isEnabled: true },
       include: { module: { select: { slug: true } } },
     });
-    const enabledHrSlugs = companyModules
-      .map(cm => cm.module.slug)
-      .filter(slug => HR_MODULE_SLUGS.includes(slug));
+    const enabledHrSlugs = enabled
+      .map((cm) => cm.module.slug)
+      .filter((slug) => HR_MODULE_SLUGS.includes(slug));
 
     return this.prisma.permission.findMany({
-      where: { module: { slug: { in: enabledHrSlugs } } },
-      include: { module: true },
-      orderBy: [{ module: { name: 'asc' } }, { action: 'asc' }],
+      where: { moduleSlug: { in: enabledHrSlugs } },
+      orderBy: [{ moduleSlug: 'asc' }, { resource: 'asc' }, { action: 'asc' }],
     });
   }
 
@@ -127,16 +138,7 @@ export class HrService {
         deletedAt: null,
         userRoles: { some: { role: { domain: HR_DOMAIN } } },
       },
-      select: {
-        id: true, name: true, email: true, isActive: true, createdAt: true,
-        roleType: true, departmentId: true,
-        department: { select: { id: true, name: true } },
-        userRoles: {
-          where: { role: { domain: HR_DOMAIN } },
-          select: { role: { select: { id: true, name: true, domain: true } } },
-        },
-        userModules: { select: { module: { select: { id: true, name: true, slug: true } } } },
-      },
+      select: this.userSelect(),
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -152,19 +154,10 @@ export class HrService {
     return user;
   }
 
-  private async fetchHrUserData(id: string, companyId: string) {
+  private fetchHrUserData(id: string, companyId: string) {
     return this.prisma.user.findFirst({
       where: { id, companyId, deletedAt: null },
-      select: {
-        id: true, name: true, email: true, isActive: true, createdAt: true,
-        roleType: true, departmentId: true,
-        department: { select: { id: true, name: true } },
-        userRoles: {
-          where: { role: { domain: HR_DOMAIN } },
-          select: { role: { select: { id: true, name: true, domain: true } } },
-        },
-        userModules: { select: { module: { select: { id: true, name: true, slug: true } } } },
-      },
+      select: this.userSelect(),
     });
   }
 
@@ -180,22 +173,26 @@ export class HrService {
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const user = await this.prisma.user.create({
-      data: { name: dto.name, email: dto.email, passwordHash, companyId, departmentId: dto.departmentId },
+      data: {
+        name: dto.name,
+        email: dto.email,
+        passwordHash,
+        companyId,
+        departmentId: dto.departmentId,
+        passwordChangedAt: new Date(),
+      },
     });
 
-    if (dto.roleIds?.length) {
-      await this.prisma.userRole.createMany({
-        data: dto.roleIds.map(roleId => ({ userId: user.id, roleId })),
-        skipDuplicates: true,
-      });
-    }
+    await this.prisma.userRole.createMany({
+      data: dto.roleIds.map((roleId) => ({ userId: user.id, roleId })),
+      skipDuplicates: true,
+    });
 
-    // Auto-assign HR modules to the new user
     const hrModules = await this.prisma.systemModule.findMany({
       where: { slug: { in: HR_MODULE_SLUGS } },
     });
     await this.prisma.userModule.createMany({
-      data: hrModules.map(mod => ({ userId: user.id, moduleId: mod.id })),
+      data: hrModules.map((mod) => ({ userId: user.id, moduleId: mod.id })),
       skipDuplicates: true,
     });
 
@@ -203,7 +200,6 @@ export class HrService {
   }
 
   async updateHrUser(id: string, dto: UpdateHrUserDto, companyId: string) {
-    // Use the domain-enforcing lookup to confirm the user is an HR user before mutating.
     await this.findOneHrUser(id, companyId);
 
     if (dto.roleIds !== undefined && dto.roleIds.length === 0) {
@@ -216,32 +212,31 @@ export class HrService {
     const data: any = {};
     if (dto.name) data.name = dto.name;
     if (dto.email) data.email = dto.email;
-    if (dto.password) data.passwordHash = await bcrypt.hash(dto.password, 12);
+    if (dto.password) {
+      data.passwordHash = await bcrypt.hash(dto.password, 12);
+      data.passwordChangedAt = new Date();
+    }
     if (typeof dto.isActive === 'boolean') data.isActive = dto.isActive;
     if (dto.departmentId !== undefined) data.departmentId = dto.departmentId;
 
     await this.prisma.user.update({ where: { id }, data });
 
     if (dto.roleIds !== undefined) {
-      // Only remove HR-domain roles; preserve any non-HR roles the user may hold.
-      const currentHrRoles = await this.prisma.userRole.findMany({
+      const currentHr = await this.prisma.userRole.findMany({
         where: { userId: id, role: { domain: HR_DOMAIN } },
         select: { roleId: true },
       });
-      const currentHrRoleIds = currentHrRoles.map(r => r.roleId);
-      if (currentHrRoleIds.length) {
+      if (currentHr.length) {
         await this.prisma.userRole.deleteMany({
-          where: { userId: id, roleId: { in: currentHrRoleIds } },
+          where: { userId: id, roleId: { in: currentHr.map((r) => r.roleId) } },
         });
       }
       await this.prisma.userRole.createMany({
-        data: dto.roleIds.map(roleId => ({ userId: id, roleId })),
+        data: dto.roleIds.map((roleId) => ({ userId: id, roleId })),
         skipDuplicates: true,
       });
     }
 
-    // Use the plain fetch so the response reflects the actual current state
-    // regardless of role changes — domain enforcement already happened above.
     const updated = await this.fetchHrUserData(id, companyId);
     if (!updated) throw new NotFoundException(`HR user ${id} not found after update`);
     return updated;
@@ -253,48 +248,62 @@ export class HrService {
     return { message: `HR user ${id} deactivated` };
   }
 
-  // ── Seed Default HR Roles for a Company ──────────────────────────────────
+  // ── Seed Default HR Roles ─────────────────────────────────────────────────
 
   async seedDefaultHrRoles(companyId: string) {
-    const hrModules = await this.prisma.systemModule.findMany({
-      where: { slug: { in: HR_MODULE_SLUGS } },
+    // Pull system permission sets defined in the catalog (e.g. "hr.viewer", "hr.standard").
+    const sets = await this.prisma.permissionSet.findMany({
+      where: {
+        isSystem: true,
+        key: { in: HR_MODULE_SLUGS.flatMap((s) => [`${s}.viewer`, `${s}.standard`, `${s}.power`, `${s}.manager`]) },
+      },
     });
-    const hrModuleIds = hrModules.map(m => m.id);
-    const allHrPerms = await this.prisma.permission.findMany({ where: { moduleId: { in: hrModuleIds } } });
-    const hrViewPerms = allHrPerms.filter(p => p.action === PermissionAction.VIEW);
-    const hrCudPerms = allHrPerms.filter(p => p.action !== PermissionAction.MANAGE);
+    const setByKey = new Map(sets.map((s) => [s.key!, s]));
 
-    const roles = [
+    const definitions: { name: string; description: string; setKeys: string[]; defaultScope: PermissionScope }[] = [
       {
         name: 'HR Admin',
         description: 'Full control over all HR modules and configurations',
-        permissions: allHrPerms,
+        setKeys: HR_MODULE_SLUGS.map((s) => `${s}.manager`),
+        defaultScope: PermissionScope.ALL,
       },
       {
         name: 'HR Manager',
-        description: 'Elevated HR access: manage HR users and assign HR roles',
-        permissions: hrCudPerms,
+        description: 'Elevated HR access: department-scoped management',
+        setKeys: HR_MODULE_SLUGS.map((s) => `${s}.power`),
+        defaultScope: PermissionScope.DEPARTMENT,
       },
       {
         name: 'HR Viewer',
         description: 'Read-only access to authorized HR data',
-        permissions: hrViewPerms,
+        setKeys: HR_MODULE_SLUGS.map((s) => `${s}.viewer`),
+        defaultScope: PermissionScope.DEPARTMENT,
       },
     ];
 
     const seeded: string[] = [];
-    for (const r of roles) {
-      const existing = await this.prisma.role.findFirst({ where: { name: r.name, companyId } });
-      if (existing) { seeded.push(`${r.name} (already exists)`); continue; }
+    for (const def of definitions) {
+      const existing = await this.prisma.role.findFirst({ where: { name: def.name, companyId } });
+      if (existing) { seeded.push(`${def.name} (already exists)`); continue; }
 
       const role = await this.prisma.role.create({
-        data: { name: r.name, description: r.description, companyId, domain: HR_DOMAIN },
+        data: {
+          name: def.name,
+          description: def.description,
+          companyId,
+          domain: HR_DOMAIN,
+          defaultScope: def.defaultScope,
+        },
       });
-      await this.prisma.rolePermission.createMany({
-        data: r.permissions.map(p => ({ roleId: role.id, permissionId: p.id })),
-        skipDuplicates: true,
-      });
-      seeded.push(r.name);
+
+      const setIds = def.setKeys.map((k) => setByKey.get(k)?.id).filter((v): v is string => !!v);
+      if (setIds.length) {
+        await this.prisma.rolePermissionSet.createMany({
+          data: setIds.map((setId) => ({ roleId: role.id, setId })),
+          skipDuplicates: true,
+        });
+      }
+      seeded.push(def.name);
     }
 
     return { message: 'HR default roles seeded', seeded };
@@ -303,25 +312,43 @@ export class HrService {
   // ── Guards ────────────────────────────────────────────────────────────────
 
   private async assertHrPermissionsOnly(permissionIds: string[]) {
-    const perms = await this.prisma.permission.findMany({
-      where: { id: { in: permissionIds } },
-      include: { module: { select: { slug: true } } },
-    });
-    const nonHr = perms.filter(p => !HR_MODULE_SLUGS.includes(p.module.slug));
+    const perms = await this.prisma.permission.findMany({ where: { id: { in: permissionIds } } });
+    const nonHr = perms.filter((p) => !HR_MODULE_SLUGS.includes(p.moduleSlug));
     if (nonHr.length) {
       throw new ForbiddenException(
-        `HR roles may only contain permissions from HR modules. Non-HR permissions rejected: ${nonHr.map(p => p.module.slug).join(', ')}`
+        `HR roles may only contain permissions from HR modules. Non-HR permissions rejected: ${nonHr.map((p) => p.moduleSlug).join(', ')}`,
       );
     }
   }
 
   private async assertHrRolesOnly(roleIds: string[], companyId: string) {
     const roles = await this.prisma.role.findMany({ where: { id: { in: roleIds }, companyId } });
-    const nonHr = roles.filter(r => r.domain !== HR_DOMAIN);
+    const nonHr = roles.filter((r) => r.domain !== HR_DOMAIN);
     if (nonHr.length) {
       throw new ForbiddenException(
-        `HR users may only be assigned HR-domain roles. Non-HR roles rejected: ${nonHr.map(r => r.name).join(', ')}`
+        `HR users may only be assigned HR-domain roles. Non-HR roles rejected: ${nonHr.map((r) => r.name).join(', ')}`,
       );
     }
+  }
+
+  private roleInclude() {
+    return {
+      _count: { select: { userRoles: true } },
+      rolePermissions: { include: { permission: true } },
+      rolePermissionSets: { include: { set: true } },
+    } as const;
+  }
+
+  private userSelect() {
+    return {
+      id: true, name: true, email: true, isActive: true, createdAt: true,
+      roleType: true, departmentId: true,
+      department: { select: { id: true, name: true } },
+      userRoles: {
+        where: { role: { domain: HR_DOMAIN } },
+        select: { role: { select: { id: true, name: true, domain: true } } },
+      },
+      userModules: { select: { module: { select: { id: true, name: true, slug: true } } } },
+    } as const;
   }
 }
