@@ -15,6 +15,15 @@ export class SystemModulesService {
     });
   }
 
+  async findEnabledForCompany(companyId: string) {
+    const rows = await this.prisma.companyModule.findMany({
+      where: { companyId, isEnabled: true, module: { isActive: true } },
+      include: { module: true },
+      orderBy: { module: { name: 'asc' } },
+    });
+    return rows.map(r => r.module);
+  }
+
   async findOne(id: string) {
     const mod = await this.prisma.systemModule.findUnique({ where: { id } });
     if (!mod) throw new NotFoundException(`Module ${id} not found`);

@@ -11,6 +11,7 @@ import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+<<<<<<< HEAD
 import {
   AccessTokenPayload,
   AuthTokens,
@@ -19,6 +20,19 @@ import {
 import { AuthAuditService, AuthRequestMeta } from './services/auth-audit.service';
 import { RefreshTokenService } from './services/refresh-token.service';
 import { PermissionResolverService } from '../permissions/permission-resolver.service';
+=======
+
+export interface JwtPayload {
+  sub: string;
+  email: string;
+  companyId: string | null;
+  isSuperAdmin: boolean;
+  roleType: UserRoleType;
+  departmentId: string | null;
+  permissions: string[];  // "moduleSlug:action" e.g. "hr:VIEW"
+  enabledModuleSlugs: string[];
+}
+>>>>>>> 2bb3478983fa190c0480716dfba06df7ab772522
 
 @Injectable()
 export class AuthService {
@@ -95,6 +109,7 @@ export class AuthService {
     const tokens = await this.issueTokenPair(user.id, meta);
     await this.audit.recordLoginAttempt({
       email: user.email,
+<<<<<<< HEAD
       companySlug: dto.companySlug ?? null,
       userId: user.id,
       success: true,
@@ -105,6 +120,15 @@ export class AuthService {
       type: AuthEventType.LOGIN_SUCCESS,
       meta,
     });
+=======
+      companyId: user.companyId ?? null,
+      isSuperAdmin: user.isSuperAdmin,
+      roleType: user.roleType,
+      departmentId: user.departmentId ?? null,
+      permissions,
+      enabledModuleSlugs,
+    };
+>>>>>>> 2bb3478983fa190c0480716dfba06df7ab772522
 
     return {
       ...tokens,
@@ -338,6 +362,7 @@ export class AuthService {
       return rows.map((r) => r.module.slug);
     }
 
+<<<<<<< HEAD
     const companyEnabled = await this.prisma.companyModule.findMany({
       where: { companyId: user.companyId, isEnabled: true },
       select: { moduleId: true },
@@ -346,6 +371,32 @@ export class AuthService {
     return (user.userModules ?? [])
       .filter((um: any) => enabledIds.has(um.moduleId))
       .map((um: any) => um.module.slug);
+=======
+    // Managers and Normal Users:
+    //   Module access = (modules assigned via UserModule)
+    //                 ∪ (modules referenced by permissions in any of the user's roles)
+    //   intersected with the company's enabled modules.
+    // Roles imply module access — assigning a role like "HR Manager" automatically
+    // makes the HR module visible without requiring a redundant module checkbox.
+    const companyEnabled = await this.prisma.companyModule.findMany({
+      where: { companyId: user.companyId, isEnabled: true },
+      include: { module: { select: { slug: true } } },
+    });
+    const companyEnabledSlugs = new Set(companyEnabled.map(cm => cm.module.slug));
+
+    const slugs = new Set<string>();
+    for (const um of user.userModules ?? []) {
+      if (um.module?.slug) slugs.add(um.module.slug);
+    }
+    for (const ur of user.userRoles ?? []) {
+      for (const rp of ur.role?.rolePermissions ?? []) {
+        const slug = rp.permission?.module?.slug;
+        if (slug) slugs.add(slug);
+      }
+    }
+
+    return [...slugs].filter(s => companyEnabledSlugs.has(s));
+>>>>>>> 2bb3478983fa190c0480716dfba06df7ab772522
   }
 
 }

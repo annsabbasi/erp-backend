@@ -27,8 +27,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       isSuperAdmin: payload.isSuperAdmin,
       roleType: payload.roleType,
       departmentId: payload.departmentId,
+<<<<<<< HEAD
       branchId: payload.branchId ?? null,
+=======
+>>>>>>> 2bb3478983fa190c0480716dfba06df7ab772522
       permissions: payload.permissions,
+      enabledModuleSlugs: payload.enabledModuleSlugs ?? [],
     };
   }
 }
